@@ -654,6 +654,7 @@ async function registerPwa() {
   if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
 
   try {
+    const hadController = Boolean(navigator.serviceWorker.controller);
     const registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
       scope: import.meta.env.BASE_URL,
     });
@@ -662,16 +663,22 @@ async function registerPwa() {
       window.dispatchEvent(new Event('little-fox-update-ready'));
     }
 
-    registration.addEventListener('updatefound', () => {
-      const worker = registration.installing;
+    const watchWorker = (worker) => {
       if (!worker) return;
       worker.addEventListener('statechange', () => {
-        if (worker.state !== 'installed') return;
-        window.dispatchEvent(
-          new Event(navigator.serviceWorker.controller ? 'little-fox-update-ready' : 'little-fox-offline-ready'),
-        );
+        if (worker.state === 'installed' && hadController) {
+          window.dispatchEvent(new Event('little-fox-update-ready'));
+        }
       });
-    });
+    };
+
+    watchWorker(registration.installing);
+    registration.addEventListener('updatefound', () => watchWorker(registration.installing));
+
+    if (!hadController) {
+      await navigator.serviceWorker.ready;
+      window.dispatchEvent(new Event('little-fox-offline-ready'));
+    }
 
     window.setInterval(() => registration.update(), 60 * 60 * 1000);
   } catch {
