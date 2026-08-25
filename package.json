@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "audio:generate": "node scripts/generate-audio.mjs",
+    "test": "node scripts/validate-content.mjs",
+    "check": "npm test && vite build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

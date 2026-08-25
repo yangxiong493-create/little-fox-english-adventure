@@ -14,7 +14,9 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        globPatterns: ['**/*.{html,js,css,png,svg,webmanifest}'],
+        // Bundle every fixed voice line so an installed iPad can play the
+        // complete adventure after one online visit.
+        globPatterns: ['**/*.{html,js,css,png,svg,webmanifest,mp3}'],
         navigateFallback: 'index.html',
         skipWaiting: true,
       },
