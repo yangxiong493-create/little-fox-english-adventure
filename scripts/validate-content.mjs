@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ITEMS, MISSIONS, VOICE_LINES } from '../src/gameData.js';
+import { ITEMS, MISSIONS, STAGES, VOICE_LINES } from '../src/gameData.js';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptDir, '..');
@@ -10,9 +10,10 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-check(MISSIONS.length === 15, `Expected 15 missions, found ${MISSIONS.length}`);
-check(new Set(MISSIONS.map((mission) => mission.id)).size === 15, 'Mission IDs must be unique');
-check(Object.keys(VOICE_LINES).length === 51, `Expected 51 voice clips, found ${Object.keys(VOICE_LINES).length}`);
+check(MISSIONS.length === 27, `Expected 27 missions, found ${MISSIONS.length}`);
+check(new Set(MISSIONS.map((mission) => mission.id)).size === 27, 'Mission IDs must be unique');
+check(STAGES.length === 3, `Expected 3 stages, found ${STAGES.length}`);
+check(Object.keys(VOICE_LINES).length === 83, `Expected 83 voice clips, found ${Object.keys(VOICE_LINES).length}`);
 
 for (const [itemId, item] of Object.entries(ITEMS)) {
   check(item.id === itemId, `Item key ${itemId} does not match its ID`);
@@ -22,7 +23,7 @@ for (const [itemId, item] of Object.entries(ITEMS)) {
 
 for (const [index, mission] of MISSIONS.entries()) {
   check(mission.id === index + 1, `Mission IDs must be contiguous at ${mission.title}`);
-  check([0, 1].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
+  check([0, 1, 2].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
   check(mission.introAudio in VOICE_LINES, `Mission ${mission.id} has an unknown intro audio key`);
   check(mission.meet.length > 0, `Mission ${mission.id} needs at least one Meet item`);
   check(Number.isInteger(mission.meetRepeats) && mission.meetRepeats > 0, `Mission ${mission.id} has invalid Meet repetitions`);

@@ -572,7 +572,12 @@ function ChallengeRound({ mission, round, play, onSolved }) {
   const finish = (assisted = false) => {
     setStatus(assisted ? 'assisted' : 'success');
     setHintLevel(3);
-    play(ITEMS[round.target].successAudio);
+    const actionSuccessAudio = {
+      'forest-find': 'yes_find',
+      'forest-give': 'yes_give',
+      'forest-put': 'yes_put',
+    }[round.mode];
+    play(actionSuccessAudio || ITEMS[round.target].successAudio);
     timerRef.current = window.setTimeout(onSolved, 950);
   };
 
@@ -601,7 +606,7 @@ function ChallengeRound({ mission, round, play, onSolved }) {
   };
 
   return (
-    <div className={`challenge-round mode-${round.mode} hint-${hintLevel} status-${status}`}>
+    <div className={`challenge-round mode-${round.mode} target-${round.target} hint-${hintLevel} status-${status}`}>
       <header className="activity-title">
         <span className="step-kicker">仔细听，小狐在说什么？</span>
         <h2>{round.prompt}</h2>
@@ -614,6 +619,11 @@ function ChallengeRound({ mission, round, play, onSolved }) {
         {round.mode === 'pack' && <div className="scene-destination">🧺</div>}
         {round.mode === 'drive' && <div className="scene-destination">〰️〰️🏁</div>}
         {round.mode === 'pour' && <div className="scene-destination">🐰　🥤</div>}
+        {round.mode === 'forest-find' && <div className="scene-destination forest-destination">🌲　🍂　🔍</div>}
+        {round.mode === 'forest-give' && <div className="scene-destination forest-destination">🐿️　👐　🎒</div>}
+        {round.mode === 'forest-put' && <div className="scene-destination forest-destination">🌳　📥　✨</div>}
+        {round.mode === 'forest-action' && <div className="scene-destination forest-action-preview"><span>🦊</span><i>🍄　·　·　🛑</i></div>}
+        {round.mode === 'forest-color' && <div className="scene-destination forest-destination">🌿　✨　🌿</div>}
         <div className={`choice-row choice-count-${round.choices.length}`} role="group" aria-label="听声音选择">
           {round.choices.map((itemId) => {
             const item = ITEMS[itemId];
@@ -764,6 +774,13 @@ function ParentPanel({ completedIds, lastMissionId, audioOn, setAudioOn, onClose
     { id: 'dog', title: 'dog', mission: 8 },
     { id: 'car', title: 'car', mission: 10 },
     { id: 'milk', title: 'milk', mission: 11 },
+    { id: 'find', title: 'Find it!', mission: 16 },
+    { id: 'give', title: 'Give it!', mission: 17 },
+    { id: 'put', title: 'Put it in!', mission: 18 },
+    { id: 'jump', title: 'Jump!', mission: 19 },
+    { id: 'stop', title: 'Stop!', mission: 20 },
+    { id: 'red', title: 'red', mission: 22 },
+    { id: 'blue', title: 'blue', mission: 23 },
   ];
   const knownItems = learningItems.filter((item) => completedIds.includes(item.mission));
 
@@ -773,7 +790,7 @@ function ParentPanel({ completedIds, lastMissionId, audioOn, setAudioOn, onClose
       <div className="parent-stats">
         <div><span>🗺️</span><b>{completedCount}</b><small>完成故事</small></div>
         <div><span>🎒</span><b>{completedCount}</b><small>故事纪念品</small></div>
-        <div><span>🌱</span><b>{completedCount} / {MISSIONS.length}</b><small>第一版进度</small></div>
+        <div><span>🌱</span><b>{completedCount} / {MISSIONS.length}</b><small>主线进度</small></div>
       </div>
       <section className="learning-report">
         <div className="report-title"><b>已经在故事里遇见</b><span>不是考试分数</span></div>

@@ -472,6 +472,14 @@ button:disabled {
 .world-board::before { top: -100px; left: -70px; }
 .world-board::after { right: -60px; bottom: -110px; }
 
+.world-stage-2 {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255, 247, 151, 0.34) 0 4%, transparent 5%),
+    radial-gradient(circle at 88% 30%, rgba(159, 236, 190, 0.42) 0 7%, transparent 8%),
+    linear-gradient(180deg, rgba(232, 255, 225, 0.8), rgba(211, 245, 193, 0.88)),
+    var(--stage-color);
+}
+
 .world-heading {
   position: relative;
   z-index: 2;
@@ -532,9 +540,9 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 54px;
+  min-width: clamp(32px, 4vw, 54px);
   height: 54px;
-  font-size: 28px;
+  font-size: clamp(21px, 3vw, 28px);
   animation: reward-pop 450ms both;
 }
 
@@ -632,6 +640,12 @@ button:disabled {
   flex-direction: column;
   padding-bottom: max(18px, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(129, 220, 235, 0.86), rgba(255, 246, 204, 0.9));
+}
+
+.lesson-stage-2 {
+  background:
+    radial-gradient(circle at 8% 22%, rgba(255, 245, 143, 0.34) 0 4%, transparent 5%),
+    linear-gradient(180deg, rgba(115, 211, 182, 0.9), rgba(238, 249, 195, 0.94));
 }
 
 .lesson-topbar {
@@ -850,6 +864,17 @@ button:disabled {
 }
 
 .scene-destination { height: 62px; font-size: 48px; letter-spacing: 0.12em; }
+.forest-destination { font-size: 42px; }
+.forest-action-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 25px;
+  height: 82px;
+  letter-spacing: 0;
+}
+.forest-action-preview span { position: relative; z-index: 2; font-size: 62px; filter: drop-shadow(0 8px 5px rgba(38, 82, 55, 0.2)); }
+.forest-action-preview i { color: #557466; font-size: 32px; font-style: normal; }
 .night-stars { position: absolute; inset: 0; padding: 30px; color: #fff9a7; background: linear-gradient(145deg, #27385e, #172241); font-size: 30px; letter-spacing: 2em; }
 .mode-flashlight .choice-row { z-index: 2; }
 .mode-flashlight .choice-card { box-shadow: 0 0 0 7px rgba(255, 243, 160, 0.1), 0 10px 0 rgba(4, 15, 35, 0.28); }
@@ -894,6 +919,13 @@ button:disabled {
 .mode-drop .choice-card.is-correct .choice-emoji { animation: drop-in 700ms ease-in; }
 .mode-pour .choice-card.is-correct .choice-emoji { animation: pour 650ms ease-in-out; }
 .mode-gift .choice-card.is-correct .choice-emoji { animation: gift-fly 700ms ease-in-out; }
+.mode-forest-find .choice-card.is-correct .choice-emoji { animation: reward-pop 650ms ease both; }
+.mode-forest-give .choice-card.is-correct .choice-emoji { animation: gift-fly 700ms ease-in-out; }
+.mode-forest-put .choice-card.is-correct .choice-emoji { animation: drop-in 700ms ease-in; }
+.target-jump.status-success .forest-action-preview span,
+.target-jump.status-assisted .forest-action-preview span { animation: action-jump 700ms ease-in-out; }
+.target-stop.status-success .forest-action-preview span,
+.target-stop.status-assisted .forest-action-preview span { animation: action-stop 700ms ease-in-out; }
 .assisted-path { position: absolute; z-index: 8; right: 20%; bottom: 7px; left: 20%; padding: 9px; border-radius: 14px; color: #81531e; background: #fff0a7; box-shadow: var(--soft-shadow); font-size: 13px; font-weight: 950; animation: reward-pop 300ms both; }
 .kind-hint { margin-top: 14px; color: #567984; font-size: 13px; font-weight: 850; }
 
@@ -1124,6 +1156,8 @@ button:disabled {
 @keyframes drop-in { 45% { transform: translateY(-55px); } to { transform: translateY(45px) scale(0.75); } }
 @keyframes pour { 50% { transform: rotate(-35deg) translate(20px, 8px); } }
 @keyframes gift-fly { 50% { transform: translateY(-50px) rotate(10deg); } to { transform: translateX(80px) scale(0.75); } }
+@keyframes action-jump { 45% { transform: translateY(-52px) rotate(-4deg); } }
+@keyframes action-stop { 25%, 75% { transform: translateX(-5px); } 50% { transform: translateX(5px); } }
 @keyframes audio-wave { to { height: 55px; } }
 @keyframes confetti-fall { from { transform: translateY(-30px) rotate(0); opacity: 0; } 20% { opacity: 1; } to { transform: translateY(480px) rotate(260deg); opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } }
@@ -1197,6 +1231,7 @@ button:disabled {
   .challenge-scene { min-height: 310px; padding: 16px 9px; }
   .choice-row { gap: 10px; }
   .choice-card { width: min(31vw, 205px); min-height: 200px; border-width: 5px; }
+  .choice-count-3 .choice-card { width: min(29vw, 190px); }
   .choice-emoji { font-size: clamp(66px, 18vw, 105px); }
   .echo-visual { grid-template-columns: 95px 1fr; padding: 20px; }
   .echo-fox { font-size: 92px; }
