@@ -147,6 +147,54 @@ assert.equal(getStageReadiness(valleyReadiness, 3).unlocked, true, 'Five recogni
 const migratedCompletedForest = normalizeProgress({ completedIds: completedStageTwo }, { legacy: true, now: startedAt });
 assert.equal(getStageReadiness(migratedCompletedForest, 3).unlocked, true, 'Existing families who finished Action Forest should keep moving forward after migration');
 
+const completedColorValley = Array.from({ length: 32 }, (_, index) => index + 1);
+let townReadiness = normalizeProgress({ completedIds: completedColorValley }, { now: startedAt });
+assert.equal(getStageReadiness(townReadiness, 4).unlocked, false, 'Completing Color Valley stories alone should not imply communication readiness');
+const combinationRecognitionBeats = {
+  red_apple: [[28, 0], [28, 1]],
+  blue_ball: [[29, 0], [29, 1]],
+  big_dog: [[31, 1], [32, 2]],
+};
+for (const [itemId, beats] of Object.entries(combinationRecognitionBeats)) {
+  for (const [missionId, roundIndex] of beats) {
+    townReadiness = evidence(townReadiness, {
+      itemId,
+      missionId,
+      roundIndex,
+      occurredAt: startedAt + (++tick * 1_000),
+      choicesCount: 2,
+      mode: 'valley-combination',
+    });
+  }
+}
+assert.equal(getStageReadiness(townReadiness, 4).unlocked, true, 'Three recognized combinations should unlock Happy Town');
+
+const migratedCompletedValley = normalizeProgress({ schemaVersion: 4, completedIds: completedColorValley }, { now: startedAt });
+assert.equal(getStageReadiness(migratedCompletedValley, 4).unlocked, true, 'Families who finished Color Valley in v4 should keep moving into Happy Town');
+
+const completedHappyTown = Array.from({ length: 47 }, (_, index) => index + 1);
+let castleReadiness = normalizeProgress({ completedIds: completedHappyTown }, { now: startedAt });
+assert.equal(getStageReadiness(castleReadiness, 5).unlocked, false, 'Completing Happy Town stories alone should not imply story readiness');
+const communicationRecognitionBeats = {
+  i_want: [[34, 0], [35, 0]],
+  here_you_are: [[38, 0], [38, 1]],
+  thank_you: [[41, 0], [42, 2]],
+  i_like: [[43, 0], [44, 0]],
+};
+for (const [itemId, beats] of Object.entries(communicationRecognitionBeats)) {
+  for (const [missionId, roundIndex] of beats) {
+    castleReadiness = evidence(castleReadiness, {
+      itemId,
+      missionId,
+      roundIndex,
+      occurredAt: startedAt + (++tick * 1_000),
+      choicesCount: 2,
+      mode: 'town-conversation',
+    });
+  }
+}
+assert.equal(getStageReadiness(castleReadiness, 5).unlocked, true, 'Four recognized communication functions should unlock Story Castle');
+
 let changedContextProgress = { ...normalizeProgress({}, { now: startedAt }), completedIds: Array.from({ length: 16 }, (_, index) => index + 1), legacyUnlockedStage: 2 };
 changedContextProgress = evidence(changedContextProgress, { itemId: 'cat', missionId: 7, roundIndex: 0, occurredAt: startedAt + 1_000 });
 changedContextProgress = evidence(changedContextProgress, { itemId: 'cat', missionId: 9, roundIndex: 0, occurredAt: startedAt + 2_000 });

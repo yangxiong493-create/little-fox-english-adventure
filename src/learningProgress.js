@@ -1,6 +1,6 @@
 import { ITEMS, MISSIONS } from './gameData.js';
 
-export const PROGRESS_SCHEMA_VERSION = 4;
+export const PROGRESS_SCHEMA_VERSION = 5;
 
 export const LEARNING_STATUS = {
   unseen: { rank: 0, label: '还没遇见', shortLabel: '未接触', icon: '○' },
@@ -28,6 +28,18 @@ export const STAGE_READINESS_RULES = {
     itemIds: ['find', 'give', 'put', 'jump', 'stop', 'red', 'blue'],
     minimumStatus: 'recognized',
     requiredCount: 5,
+  },
+  4: {
+    sourceStage: 3,
+    itemIds: ['red_apple', 'blue_ball', 'big_dog', 'small_cat'],
+    minimumStatus: 'recognized',
+    requiredCount: 3,
+  },
+  5: {
+    sourceStage: 4,
+    itemIds: ['i_want', 'here_you_are', 'thank_you', 'i_like', 'im_happy'],
+    minimumStatus: 'recognized',
+    requiredCount: 4,
   },
 };
 

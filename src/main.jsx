@@ -21,11 +21,13 @@ const LESSON_STEPS = [
   { id: 'reward', label: '世界变了', icon: '🌟' },
 ];
 
-const PROGRESS_STORAGE_KEY = 'little-fox-progress-v4';
-const LEGACY_PROGRESS_STORAGE_KEYS = ['little-fox-progress-v3', 'little-fox-progress-v2'];
+const PROGRESS_STORAGE_KEY = 'little-fox-progress-v5';
+const LEGACY_PROGRESS_STORAGE_KEYS = ['little-fox-progress-v4', 'little-fox-progress-v3', 'little-fox-progress-v2'];
+const PLACEMENT_MODES = new Set(['forest-give', 'forest-put', 'town-share', 'castle-give', 'castle-put']);
 const CRITICAL_VOICE_KEYS = [
   'zh_welcome', 'welcome', 'zh_meet', 'zh_listen_choose', 'zh_try_again',
-  'zh_together', 'zh_echo', 'zh_reward', 'reward_done',
+  'zh_together', 'zh_echo_detail', 'zh_reward', 'reward_done', 'zh_story_next',
+  'zh_meet_done', 'zh_give_finish', 'zh_put_finish', 'zh_reward_next', 'zh_wait_help', 'zh_story_order',
   ...MISSIONS.slice(0, 3).flatMap((mission) => [
     mission.introAudio,
     ...mission.meet.map((itemId) => ITEMS[itemId].audio),
@@ -205,7 +207,7 @@ export default function App() {
     setMusicAllowed(false);
     setMissionId(id);
     setScreen('lesson');
-    void play(mission.introAudio, { feedback: true });
+    void playSequence([mission.introAudio, 'zh_story_next'], { feedback: true });
   };
 
   const recordExposureEvent = useCallback((evidence) => {
@@ -328,7 +330,7 @@ function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, onStart,
   const startNote = reviewSuggestion
     ? `小狐想再听一次 ${ITEMS[reviewSuggestion.itemId].display}`
     : allDone
-      ? '再去看看花园朋友'
+      ? '再去看看岛上朋友'
       : `${nextMission.title}在等你`;
   return (
     <section className="welcome-screen page-pad">
@@ -342,7 +344,7 @@ function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, onStart,
 
       <div className="welcome-content">
         <div className="welcome-copy">
-          <div className="eyebrow"><span>{allDone ? 'WOW' : 'NEW'}</span>{allDone ? ' 花园庆典已点亮' : ' 今天的小小冒险'}</div>
+          <div className="eyebrow"><span>{allDone ? 'WOW' : 'NEW'}</span>{allDone ? ' 友谊之星已点亮' : ' 今天的小小冒险'}</div>
           <h1>和小狐一起<br /><em>听英语，去冒险！</em></h1>
           <p>听声音、看动作、动手帮助朋友。<br />不认识字，也能自己玩。</p>
           <button className="primary-cta" onClick={onStart} type="button" data-testid="welcome-start">
@@ -394,7 +396,7 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
       ? '再确认一个熟悉的声音，新世界就准备好了'
       : '到了自然复习的时间'
     : completedIds.length === MISSIONS.length
-      ? '庆典已经点亮，随时可以重玩'
+      ? '友谊之星已经点亮，随时可以重玩'
       : '下一件可以帮忙的事';
 
   return (
@@ -496,11 +498,12 @@ function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExpo
   };
   const goToChallenge = () => {
     setStepIndex(2);
-    void playSequence(['zh_listen_choose', mission.rounds[0].audio], { feedback: true });
+    const guide = mission.stage === 5 ? 'zh_story_order' : 'zh_listen_choose';
+    void playSequence([guide, mission.rounds[0].audio], { feedback: true });
   };
   const goToEcho = () => {
     setStepIndex(3);
-    void play('zh_echo');
+    void play('zh_echo_detail');
   };
   const goToReward = () => {
     if (!completionRecorded.current) {
@@ -508,7 +511,7 @@ function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExpo
       onComplete(mission.id);
     }
     setStepIndex(4);
-    void playSequence(['zh_reward', 'reward_done']);
+    void playSequence(['zh_reward', 'reward_done', 'zh_reward_next']);
   };
 
   return (
@@ -568,6 +571,8 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   const [handTarget, setHandTarget] = useState('');
   const touchTimerRef = useRef(null);
   const guidanceTimersRef = useRef([]);
+  const doneAnnouncedRef = useRef(false);
+  const mountedRef = useRef(true);
   const requiredPerItem = mission.meetRepeats;
   const totalRequired = mission.meet.length * requiredPerItem;
   const totalTouches = mission.meet.reduce((sum, itemId) => sum + Math.min(touchesByItem[itemId] || 0, requiredPerItem), 0);
@@ -591,23 +596,35 @@ function MeetStep({ mission, play, onExposure, onNext }) {
     };
   }, [mission.id, nextItemId, nextItemTouches, onExposure, play, ready]);
 
-  useEffect(() => () => {
-    window.clearTimeout(touchTimerRef.current);
-    guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(touchTimerRef.current);
+      guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    };
   }, []);
 
   const touchItem = (itemId) => {
+    if (ready) return;
     const item = ITEMS[itemId];
     guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     guidanceTimersRef.current = [];
     setLastTouched(itemId);
     setHandTarget('');
-    setTouchesByItem((value) => ({
-      ...value,
-      [itemId]: Math.min((value[itemId] || 0) + 1, requiredPerItem),
-    }));
+    const nextCount = Math.min((touchesByItem[itemId] || 0) + 1, requiredPerItem);
+    const willBeReady = mission.meet.every((candidateId) => (
+      candidateId === itemId ? nextCount : (touchesByItem[candidateId] || 0)
+    ) >= requiredPerItem);
+    setTouchesByItem((value) => ({ ...value, [itemId]: nextCount }));
     onExposure({ itemId, missionId: mission.id });
-    void play(item.audio, { feedback: true });
+    void play(item.audio, { feedback: true }).then((finished) => {
+      if (finished && mountedRef.current && willBeReady && !doneAnnouncedRef.current) {
+        doneAnnouncedRef.current = true;
+        return play('zh_meet_done');
+      }
+      return undefined;
+    });
     window.clearTimeout(touchTimerRef.current);
     touchTimerRef.current = window.setTimeout(() => setLastTouched(''), 600);
   };
@@ -698,7 +715,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
 
   useEffect(() => {
     if (status !== 'ready') return undefined;
-    const replayTimer = window.setTimeout(() => void play(round.audio), 8200);
+    const replayTimer = window.setTimeout(() => void playSequence(['zh_wait_help', round.audio]), 8200);
     const motionTimer = window.setTimeout(() => setHintLevel(1), 11000);
     const spotlightTimer = window.setTimeout(() => setHintLevel(2), 14000);
     return () => {
@@ -706,7 +723,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
       window.clearTimeout(motionTimer);
       window.clearTimeout(spotlightTimer);
     };
-  }, [activityTick, play, round.audio, status, tries]);
+  }, [activityTick, playSequence, round.audio, status, tries]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -739,6 +756,14 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
       'forest-find': 'yes_find',
       'forest-give': 'yes_give',
       'forest-put': 'yes_put',
+      'town-want': { apple: 'yes_want_apple', ball: 'yes_want_ball', milk: 'yes_want_milk' }[round.target],
+      'town-share': 'yes_here_you_are',
+      'town-thank': 'yes_thank_you',
+      'town-like': { apple: 'yes_like_apples', cat: 'yes_like_cats', milk: 'yes_like_milk' }[round.target],
+      'town-feeling': 'yes_im_happy',
+      'castle-find': 'yes_find',
+      'castle-give': 'yes_give',
+      'castle-put': 'yes_put',
     }[round.mode];
     void play(actionSuccessAudio || ITEMS[round.target].successAudio, { feedback: true }).then(() => {
       if (!mountedRef.current) return;
@@ -750,9 +775,10 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
     if (status !== 'ready') return;
     setActivityTick((value) => value + 1);
     if (itemId === round.target) {
-      if (round.mode === 'forest-give' || round.mode === 'forest-put') {
+      if (PLACEMENT_MODES.has(round.mode)) {
         setSelectedResult({ attempts: tries, hintLevel });
         setStatus('placing');
+        void play(round.mode.includes('put') ? 'zh_put_finish' : 'zh_give_finish', { feedback: true });
         return;
       }
       finish(false, { attempts: tries, hintLevel });
@@ -783,10 +809,17 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
     finish(false, selectedResult);
   };
 
+  const defaultPlacement = round.mode === 'forest-put'
+    ? '🌳　📥　✨'
+    : round.mode === 'forest-give'
+      ? '🐿️　👐　🎒'
+      : '🦊　👐　✨';
+  const placementLabel = round.destinationLabel || (round.mode.includes('put') ? '把宝物放进闪亮的地方' : '把宝物递给朋友');
+
   return (
     <div className={`challenge-round mode-${round.mode} target-${round.target} hint-${hintLevel} status-${status}`}>
       <header className="activity-title">
-        <span className="step-kicker">仔细听，小狐在说什么？</span>
+        <span className="step-kicker">{mission.stage === 5 ? '故事进行到下一步' : '仔细听，小狐在说什么？'}</span>
         <h2 lang="en">{round.prompt}</h2>
         <button className="big-audio-button" onClick={() => { setActivityTick((value) => value + 1); void play(round.audio, { feedback: true }); }} type="button" disabled={status !== 'ready'}><span>🔊</span><b>再听一次</b></button>
       </header>
@@ -798,12 +831,13 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
         {round.mode === 'drive' && <div className="scene-destination">〰️〰️🏁</div>}
         {round.mode === 'pour' && <div className="scene-destination">🐰　🥤</div>}
         {round.mode === 'forest-find' && <div className="scene-destination forest-destination">🌲　🍂　🔍</div>}
-        {round.mode === 'forest-give' && <button className={`scene-destination forest-destination action-destination ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label="把宝物递给松鼠" disabled={status !== 'placing'}>🐿️　👐　🎒{status === 'placing' && <i>☝️</i>}</button>}
-        {round.mode === 'forest-put' && <button className={`scene-destination forest-destination action-destination ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label="把宝物放进树洞" disabled={status !== 'placing'}>🌳　📥　✨{status === 'placing' && <i>☝️</i>}</button>}
+        {PLACEMENT_MODES.has(round.mode) && <button className={`scene-destination forest-destination action-destination ${round.mode.startsWith('town') ? 'town-destination' : ''} ${round.mode.startsWith('castle') ? 'castle-destination' : ''} ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label={placementLabel} disabled={status !== 'placing'}>{round.destination || defaultPlacement}{status === 'placing' && <i>☝️</i>}</button>}
         {round.mode === 'forest-action' && <div className="scene-destination forest-action-preview"><span>🦊</span><i>🍄　·　·　🛑</i></div>}
+        {round.mode === 'castle-action' && <div className="scene-destination forest-action-preview castle-action-preview"><span>🦊</span><i>{round.scene || '🏰　·　👑'}</i></div>}
         {round.mode === 'forest-color' && <div className="scene-destination forest-destination">🌿　✨　🌿</div>}
         {round.mode === 'valley-color' && <div className="scene-destination valley-destination">🌈　✨　🎨</div>}
         {round.mode === 'valley-size' && <div className="scene-destination valley-destination">●　✨　•</div>}
+        {round.scene && !PLACEMENT_MODES.has(round.mode) && round.mode !== 'castle-action' && <div className={`scene-destination themed-destination ${round.mode.startsWith('town') ? 'town-destination' : ''} ${round.mode.startsWith('castle') ? 'castle-destination' : ''}`}>{round.scene}</div>}
         <div className={`choice-row choice-count-${round.choices.length}`} role="group" aria-label="听声音选择">
           {round.choices.map((itemId) => {
             const item = ITEMS[itemId];
@@ -828,7 +862,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
         </div>
         {status === 'helping' && <div className="assisted-path">🦊 · · · ☝️ 一起完成</div>}
       </div>
-      <div className="kind-hint">{status === 'placing' ? '✨ 再点一下上面的朋友或树洞，完成动作' : '💛 点错没关系，小狐会一步一步来帮忙'}</div>
+      <div className="kind-hint">{status === 'placing' ? '✨ 再点一下上面闪亮的地方，完成动作' : '💛 点错没关系，小狐会一步一步来帮忙'}</div>
     </div>
   );
 }

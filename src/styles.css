@@ -419,9 +419,9 @@ button:disabled {
 
 .stage-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
-  width: min(1000px, 100%);
+  width: min(1120px, 100%);
   margin: 8px auto 16px;
 }
 
@@ -486,6 +486,22 @@ button:disabled {
     radial-gradient(circle at 12% 25%, rgba(255, 113, 130, 0.2) 0 6%, transparent 7%),
     radial-gradient(circle at 88% 19%, rgba(87, 185, 232, 0.24) 0 8%, transparent 9%),
     linear-gradient(180deg, rgba(247, 229, 255, 0.86), rgba(231, 248, 221, 0.9)),
+    var(--stage-color);
+}
+
+.world-stage-4 {
+  background:
+    radial-gradient(circle at 14% 24%, rgba(255, 216, 109, 0.3) 0 6%, transparent 7%),
+    radial-gradient(circle at 88% 18%, rgba(255, 149, 116, 0.22) 0 7%, transparent 8%),
+    linear-gradient(180deg, rgba(255, 244, 205, 0.9), rgba(222, 247, 218, 0.92)),
+    var(--stage-color);
+}
+
+.world-stage-5 {
+  background:
+    radial-gradient(circle at 13% 20%, rgba(255, 247, 167, 0.3) 0 3%, transparent 4%),
+    radial-gradient(circle at 86% 25%, rgba(219, 203, 255, 0.32) 0 8%, transparent 9%),
+    linear-gradient(180deg, rgba(220, 222, 255, 0.9), rgba(234, 248, 229, 0.94)),
     var(--stage-color);
 }
 
@@ -673,6 +689,20 @@ button:disabled {
     linear-gradient(180deg, rgba(198, 169, 239, 0.88), rgba(235, 248, 202, 0.94));
 }
 
+.lesson-stage-4 {
+  background:
+    radial-gradient(circle at 10% 18%, rgba(255, 225, 121, 0.34) 0 5%, transparent 6%),
+    radial-gradient(circle at 91% 26%, rgba(255, 143, 118, 0.24) 0 6%, transparent 7%),
+    linear-gradient(180deg, rgba(255, 208, 139, 0.9), rgba(225, 248, 210, 0.95));
+}
+
+.lesson-stage-5 {
+  background:
+    radial-gradient(circle at 9% 17%, rgba(255, 245, 168, 0.3) 0 3%, transparent 4%),
+    radial-gradient(circle at 91% 25%, rgba(196, 176, 255, 0.28) 0 7%, transparent 8%),
+    linear-gradient(180deg, rgba(146, 157, 224, 0.92), rgba(224, 242, 224, 0.96));
+}
+
 .lesson-topbar {
   position: relative;
   z-index: 3;
@@ -844,6 +874,14 @@ button:disabled {
 .meet-item.item-blue_ball > span:not(.demo-hand),
 .meet-item.item-red_ball > span:not(.demo-hand),
 .meet-item.item-blue_apple > span:not(.demo-hand) { font-size: clamp(64px, 8vw, 98px); letter-spacing: -0.18em; }
+.meet-item.item-want_apple > span:not(.demo-hand),
+.meet-item.item-want_ball > span:not(.demo-hand),
+.meet-item.item-want_milk > span:not(.demo-hand),
+.meet-item.item-here_you_are > span:not(.demo-hand),
+.meet-item.item-like_apples > span:not(.demo-hand),
+.meet-item.item-like_cats > span:not(.demo-hand),
+.meet-item.item-like_milk > span:not(.demo-hand),
+.meet-item.item-im_happy > span:not(.demo-hand) { font-size: clamp(58px, 7vw, 88px); letter-spacing: -0.12em; }
 .meet-item.size-big > span:not(.demo-hand) { font-size: clamp(126px, 17vw, 185px); }
 .meet-item.size-small > span:not(.demo-hand) { font-size: clamp(54px, 7vw, 78px); }
 .item-big > span:not(.demo-hand),
@@ -905,6 +943,9 @@ button:disabled {
 .scene-destination { height: 62px; font-size: 48px; letter-spacing: 0.12em; }
 .forest-destination { font-size: 42px; }
 .valley-destination { color: #634f86; font-size: 42px; font-weight: 950; letter-spacing: 0.04em; }
+.themed-destination { display: grid; place-items: center; width: min(620px, 100%); margin: 0 auto 5px; border-radius: 22px; font-size: 43px; letter-spacing: 0.06em; }
+.town-destination { color: #7c5430; background: linear-gradient(90deg, rgba(255, 248, 208, 0.72), rgba(255, 229, 202, 0.72)); }
+.castle-destination { color: #504b83; background: linear-gradient(90deg, rgba(238, 234, 255, 0.76), rgba(221, 241, 255, 0.72)); }
 .action-destination { position: relative; width: min(430px, 100%); margin: 0 auto 8px; border: 4px solid transparent; border-radius: 22px; background: rgba(255, 255, 255, 0.22); cursor: default; }
 .action-destination.is-ready { border-color: #ffe16c; background: rgba(255, 251, 205, 0.92); box-shadow: 0 0 0 9px rgba(255, 225, 108, 0.25), var(--soft-shadow); cursor: pointer; animation: target-breathe 1.25s ease-in-out infinite; }
 .action-destination i { position: absolute; right: 12px; bottom: -22px; font-size: 39px; font-style: normal; animation: hand-tap 1s ease-in-out infinite; }
@@ -951,6 +992,22 @@ button:disabled {
 .choice-card.item-blue_ball .choice-emoji,
 .choice-card.item-red_ball .choice-emoji,
 .choice-card.item-blue_apple .choice-emoji { font-size: clamp(58px, 7.5vw, 92px); letter-spacing: -0.18em; }
+.choice-card.item-want_apple .choice-emoji,
+.choice-card.item-want_ball .choice-emoji,
+.choice-card.item-want_milk .choice-emoji,
+.choice-card.item-here_you_are .choice-emoji,
+.choice-card.item-like_apples .choice-emoji,
+.choice-card.item-like_cats .choice-emoji,
+.choice-card.item-like_milk .choice-emoji,
+.choice-card.item-im_happy .choice-emoji { font-size: clamp(52px, 6.6vw, 82px); letter-spacing: -0.12em; }
+.choice-card.item-want_apple b,
+.choice-card.item-want_ball b,
+.choice-card.item-want_milk b,
+.choice-card.item-here_you_are b,
+.choice-card.item-like_apples b,
+.choice-card.item-like_cats b,
+.choice-card.item-like_milk b,
+.choice-card.item-im_happy b { font-size: 17px; }
 .choice-card.size-big .choice-emoji { font-size: clamp(126px, 15vw, 175px); }
 .choice-card.size-small .choice-emoji { font-size: clamp(52px, 6vw, 72px); }
 .choice-card b { position: relative; z-index: 2; color: #315566; font-size: 22px; }
@@ -974,6 +1031,16 @@ button:disabled {
 .mode-forest-put .choice-card.is-correct .choice-emoji { animation: drop-in 700ms ease-in; }
 .mode-valley-color .choice-card.is-correct .choice-emoji,
 .mode-valley-size .choice-card.is-correct .choice-emoji { animation: reward-pop 650ms ease both; }
+.mode-town-want .choice-card.is-correct .choice-emoji { animation: town-order 650ms ease both; }
+.mode-town-share .choice-card.is-correct .choice-emoji,
+.mode-castle-give .choice-card.is-correct .choice-emoji { animation: gift-fly 700ms ease-in-out; }
+.mode-town-thank .choice-card.is-correct .choice-emoji,
+.mode-town-like .choice-card.is-correct .choice-emoji,
+.mode-town-feeling .choice-card.is-correct .choice-emoji { animation: heart-pop 700ms ease both; }
+.mode-castle-find .choice-card.is-correct .choice-emoji,
+.mode-castle-dialogue .choice-card.is-correct .choice-emoji,
+.mode-castle-size .choice-card.is-correct .choice-emoji { animation: reward-pop 650ms ease both; }
+.mode-castle-put .choice-card.is-correct .choice-emoji { animation: drop-in 700ms ease-in; }
 .target-jump.status-success .forest-action-preview span,
 .target-jump.status-assisted .forest-action-preview span { animation: action-jump 700ms ease-in-out; }
 .target-stop.status-success .forest-action-preview span,
@@ -1009,6 +1076,22 @@ button:disabled {
 .echo-word-card.item-blue_ball span,
 .echo-word-card.item-red_ball span,
 .echo-word-card.item-blue_apple span { font-size: 82px; letter-spacing: -0.18em; }
+.echo-word-card.item-want_apple span,
+.echo-word-card.item-want_ball span,
+.echo-word-card.item-want_milk span,
+.echo-word-card.item-here_you_are span,
+.echo-word-card.item-like_apples span,
+.echo-word-card.item-like_cats span,
+.echo-word-card.item-like_milk span,
+.echo-word-card.item-im_happy span { font-size: 70px; letter-spacing: -0.12em; }
+.echo-word-card.item-want_apple b,
+.echo-word-card.item-want_ball b,
+.echo-word-card.item-want_milk b,
+.echo-word-card.item-here_you_are b,
+.echo-word-card.item-like_apples b,
+.echo-word-card.item-like_cats b,
+.echo-word-card.item-like_milk b,
+.echo-word-card.item-im_happy b { font-size: 29px; }
 .echo-word-card.size-big span { font-size: 155px; }
 .echo-word-card.size-small span { font-size: 68px; }
 .echo-word-card b { font-size: 38px; }
@@ -1220,6 +1303,8 @@ button:disabled {
 @keyframes gift-fly { 50% { transform: translateY(-50px) rotate(10deg); } to { transform: translateX(80px) scale(0.75); } }
 @keyframes action-jump { 45% { transform: translateY(-52px) rotate(-4deg); } }
 @keyframes action-stop { 25%, 75% { transform: translateX(-5px); } 50% { transform: translateX(5px); } }
+@keyframes town-order { 45% { transform: translateY(-20px) rotate(-4deg) scale(1.08); } 75% { transform: rotate(3deg); } }
+@keyframes heart-pop { 45% { transform: scale(1.22) rotate(-4deg); } 75% { transform: scale(0.96) rotate(3deg); } }
 @keyframes audio-wave { to { height: 55px; } }
 @keyframes confetti-fall { from { transform: translateY(-30px) rotate(0); opacity: 0; } 20% { opacity: 1; } to { transform: translateY(480px) rotate(260deg); opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } }
@@ -1299,6 +1384,14 @@ button:disabled {
   .choice-card.item-blue_ball .choice-emoji,
   .choice-card.item-red_ball .choice-emoji,
   .choice-card.item-blue_apple .choice-emoji { font-size: clamp(48px, 11vw, 76px); }
+  .choice-card.item-want_apple .choice-emoji,
+  .choice-card.item-want_ball .choice-emoji,
+  .choice-card.item-want_milk .choice-emoji,
+  .choice-card.item-here_you_are .choice-emoji,
+  .choice-card.item-like_apples .choice-emoji,
+  .choice-card.item-like_cats .choice-emoji,
+  .choice-card.item-like_milk .choice-emoji,
+  .choice-card.item-im_happy .choice-emoji { font-size: clamp(43px, 10vw, 66px); }
   .choice-card.size-big .choice-emoji { font-size: clamp(105px, 24vw, 145px); }
   .choice-card.size-small .choice-emoji { font-size: clamp(42px, 10vw, 62px); }
   .echo-visual { grid-template-columns: 95px 1fr; padding: 20px; }
@@ -1309,6 +1402,14 @@ button:disabled {
   .echo-word-card.item-blue_ball span,
   .echo-word-card.item-red_ball span,
   .echo-word-card.item-blue_apple span { font-size: 68px; }
+  .echo-word-card.item-want_apple span,
+  .echo-word-card.item-want_ball span,
+  .echo-word-card.item-want_milk span,
+  .echo-word-card.item-here_you_are span,
+  .echo-word-card.item-like_apples span,
+  .echo-word-card.item-like_cats span,
+  .echo-word-card.item-like_milk span,
+  .echo-word-card.item-im_happy span { font-size: 57px; }
   .echo-word-card.size-big span { font-size: 125px; }
   .echo-word-card.size-small span { font-size: 56px; }
   .sound-waves { left: 105px; }
@@ -1340,6 +1441,14 @@ button:disabled {
   .choice-card.item-blue_ball .choice-emoji,
   .choice-card.item-red_ball .choice-emoji,
   .choice-card.item-blue_apple .choice-emoji { font-size: 45px; }
+  .choice-card.item-want_apple .choice-emoji,
+  .choice-card.item-want_ball .choice-emoji,
+  .choice-card.item-want_milk .choice-emoji,
+  .choice-card.item-here_you_are .choice-emoji,
+  .choice-card.item-like_apples .choice-emoji,
+  .choice-card.item-like_cats .choice-emoji,
+  .choice-card.item-like_milk .choice-emoji,
+  .choice-card.item-im_happy .choice-emoji { font-size: 39px; }
   .choice-card.size-big .choice-emoji { font-size: 92px; }
   .choice-card.size-small .choice-emoji { font-size: 38px; }
   .badge-grid { grid-template-columns: repeat(2, 1fr); }

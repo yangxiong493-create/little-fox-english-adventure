@@ -10,11 +10,11 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-check(MISSIONS.length === 32, `Expected 32 missions, found ${MISSIONS.length}`);
-check(new Set(MISSIONS.map((mission) => mission.id)).size === 32, 'Mission IDs must be unique');
-check(STAGES.length === 4, `Expected 4 stages, found ${STAGES.length}`);
-check(Object.keys(ITEMS).length === 23, `Expected 23 items, found ${Object.keys(ITEMS).length}`);
-check(Object.keys(VOICE_LINES).length === 117, `Expected 117 voice clips, found ${Object.keys(VOICE_LINES).length}`);
+check(MISSIONS.length === 59, `Expected 59 missions, found ${MISSIONS.length}`);
+check(new Set(MISSIONS.map((mission) => mission.id)).size === 59, 'Mission IDs must be unique');
+check(STAGES.length === 6, `Expected 6 stages, found ${STAGES.length}`);
+check(Object.keys(ITEMS).length === 34, `Expected 34 items, found ${Object.keys(ITEMS).length}`);
+check(Object.keys(VOICE_LINES).length === 186, `Expected 186 voice clips, found ${Object.keys(VOICE_LINES).length}`);
 
 for (const [itemId, item] of Object.entries(ITEMS)) {
   check(item.id === itemId, `Item key ${itemId} does not match its ID`);
@@ -24,7 +24,7 @@ for (const [itemId, item] of Object.entries(ITEMS)) {
 
 for (const [index, mission] of MISSIONS.entries()) {
   check(mission.id === index + 1, `Mission IDs must be contiguous at ${mission.title}`);
-  check([0, 1, 2, 3].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
+  check([0, 1, 2, 3, 4, 5].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
   check(mission.introAudio in VOICE_LINES, `Mission ${mission.id} has an unknown intro audio key`);
   check(mission.meet.length > 0, `Mission ${mission.id} needs at least one Meet item`);
   check(new Set(mission.meet).size === mission.meet.length, `Mission ${mission.id} has duplicate Meet items`);
