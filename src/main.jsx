@@ -73,6 +73,7 @@ function useGameAudio(audioOn) {
   const playSequence = useCallback((keys, options) => gameAudio.playSequence(keys, options), []);
   const stop = useCallback(() => gameAudio.stop(), []);
   const unlock = useCallback((options) => gameAudio.unlock(options), []);
+  const setMusicAllowed = useCallback((allowed, options) => gameAudio.setMusicAllowed(allowed, options), []);
 
   useEffect(() => {
     gameAudio.setEnabled(audioOn);
@@ -93,8 +94,8 @@ function useGameAudio(audioOn) {
     };
   }, []);
 
-  useEffect(() => stop, [stop]);
-  return { play, playSequence, stop, unlock };
+  useEffect(() => () => gameAudio.shutdown(), []);
+  return { play, playSequence, stop, unlock, setMusicAllowed };
 }
 
 export default function App() {
@@ -107,7 +108,7 @@ export default function App() {
   const [parentOpen, setParentOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [clock, setClock] = useState(() => Date.now());
-  const { play, playSequence, stop, unlock } = useGameAudio(progress.audioOn);
+  const { play, playSequence, stop, unlock, setMusicAllowed } = useGameAudio(progress.audioOn);
 
   const completedSet = useMemo(() => new Set(progress.completedIds), [progress.completedIds]);
   const nextIncomplete = MISSIONS.find((mission) => !completedSet.has(mission.id)) || null;
@@ -149,6 +150,10 @@ export default function App() {
   }, [screen, missionId]);
 
   useEffect(() => {
+    setMusicAllowed(screen !== 'lesson');
+  }, [screen, setMusicAllowed]);
+
+  useEffect(() => {
     const offlineReady = () => setToast('✓ 声音和关卡已缓存，断网也能玩');
     const updateReady = () => setToast('✨ 新版本已准备好，下次打开自动更新');
     window.addEventListener('little-fox-offline-ready', offlineReady);
@@ -178,6 +183,7 @@ export default function App() {
   const toggleAudio = () => setAudioPreference(!progress.audioOn, { feedback: !progress.audioOn });
 
   const openMap = () => {
+    setMusicAllowed(true);
     setScreen('map');
     void playSequence(['zh_welcome', 'welcome'], { feedback: true });
   };
@@ -196,6 +202,7 @@ export default function App() {
       ...value,
       legacyUnlockedStage: Math.max(value.legacyUnlockedStage, mission.stage),
     }));
+    setMusicAllowed(false);
     setMissionId(id);
     setScreen('lesson');
     void play(mission.introAudio, { feedback: true });
@@ -222,6 +229,7 @@ export default function App() {
 
   const goMap = () => {
     stop();
+    setMusicAllowed(true, { restart: true });
     setScreen('map');
     setMissionId(null);
   };

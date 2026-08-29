@@ -1,51 +1,14 @@
 import { VOICE_LINES } from './gameData.js';
 
-const MUSIC_LEVEL = 0.34;
-const DUCKED_MUSIC_LEVEL = 0.075;
-const MUSIC_DURATION = 16;
+const MUSIC_LEVEL = 0.15;
+const MUSIC_FADE_SECONDS = 0.65;
 
 function audioUrl(key) {
   return `${import.meta.env.BASE_URL}audio/voice/${key}.mp3`;
 }
 
-function createMusicBuffer(context) {
-  const sampleRate = context.sampleRate;
-  const frameCount = Math.floor(MUSIC_DURATION * sampleRate);
-  const buffer = context.createBuffer(1, frameCount, sampleRate);
-  const channel = buffer.getChannelData(0);
-  const chords = [
-    [130.81, 164.81, 196.00],
-    [130.81, 174.61, 220.00],
-    [146.83, 196.00, 246.94],
-    [130.81, 164.81, 196.00],
-  ];
-  const melody = [523.25, 659.25, 783.99, 659.25, 698.46, 659.25, 523.25, 440.00,
-    587.33, 783.99, 880.00, 783.99, 659.25, 587.33, 523.25, 392.00,
-    659.25, 783.99, 987.77, 783.99, 698.46, 659.25, 587.33, 493.88,
-    523.25, 659.25, 783.99, 659.25, 587.33, 493.88, 392.00, 523.25];
-
-  for (let index = 0; index < frameCount; index += 1) {
-    const time = index / sampleRate;
-    const chordIndex = Math.min(3, Math.floor(time / 4));
-    const chordTime = time % 4;
-    const padEnvelope = Math.sin(Math.PI * chordTime / 4) ** 0.72;
-    const pad = chords[chordIndex].reduce((sum, frequency, voiceIndex) => (
-      sum
-      + Math.sin(2 * Math.PI * frequency * time + voiceIndex * 0.35)
-      + 0.22 * Math.sin(2 * Math.PI * frequency * 2 * time)
-    ), 0) / 3.66;
-
-    const noteIndex = Math.min(melody.length - 1, Math.floor(time / 0.5));
-    const noteTime = time % 0.5;
-    const bellEnvelope = Math.sin(Math.PI * Math.min(1, noteTime / 0.48)) * Math.exp(-4.6 * noteTime);
-    const frequency = melody[noteIndex];
-    const bell = Math.sin(2 * Math.PI * frequency * time)
-      + 0.32 * Math.sin(2 * Math.PI * frequency * 2 * time)
-      + 0.12 * Math.sin(2 * Math.PI * frequency * 3 * time);
-    const loopFade = Math.min(1, time / 0.08, (MUSIC_DURATION - time) / 0.08);
-    channel[index] = loopFade * ((pad * padEnvelope * 0.055) + (bell * bellEnvelope * 0.07));
-  }
-  return buffer;
+function musicUrl() {
+  return `${import.meta.env.BASE_URL}audio/music/spring-field.mp3`;
 }
 
 class GameAudioEngine {
@@ -54,8 +17,11 @@ class GameAudioEngine {
     this.voiceGain = null;
     this.musicGain = null;
     this.sfxGain = null;
-    this.musicBuffer = null;
-    this.musicSource = null;
+    this.musicElement = null;
+    this.musicElementSource = null;
+    this.musicPrepared = false;
+    this.musicAllowed = true;
+    this.voiceActive = false;
     this.feedbackSource = null;
     this.currentVoice = null;
     this.buffers = new Map();
@@ -78,6 +44,8 @@ class GameAudioEngine {
     document.documentElement.dataset.audioContext = snapshot.contextState;
     document.documentElement.dataset.audioMusic = String(snapshot.musicActive);
     document.documentElement.dataset.audioMusicLevel = String(snapshot.musicLevel);
+    document.documentElement.dataset.audioMusicAllowed = String(snapshot.musicAllowed);
+    document.documentElement.dataset.audioVoiceActive = String(snapshot.voiceActive);
     document.documentElement.dataset.audioLatency = snapshot.startLatencyMs === null ? '' : String(snapshot.startLatencyMs);
   }
 
@@ -99,20 +67,39 @@ class GameAudioEngine {
     return this.context;
   }
 
+  ensureMusicElement() {
+    const context = this.ensureGraph();
+    if (!context || typeof window === 'undefined') return null;
+    if (this.musicElement) return this.musicElement;
+    const element = new window.Audio(musicUrl());
+    element.preload = 'auto';
+    element.loop = false;
+    element.playsInline = true;
+    element.addEventListener('ended', () => {
+      this.requestedMusicLevel = 0;
+      this.publishDebug();
+    });
+    this.musicElement = element;
+    this.musicElementSource = context.createMediaElementSource(element);
+    this.musicElementSource.connect(this.musicGain);
+    return element;
+  }
+
   unlock({ feedback = false } = {}) {
     if (!this.enabled) return Promise.resolve(false);
     const context = this.ensureGraph();
     if (!context) return Promise.resolve(false);
     const resumed = context.state === 'suspended' ? context.resume() : Promise.resolve();
     if (feedback) this.playFeedback();
-    this.startMusic();
+    if (this.musicAllowed) this.startMusic();
     return resumed.then(() => context.state === 'running').catch(() => false);
   }
 
   setEnabled(enabled) {
     this.enabled = Boolean(enabled);
     if (!this.enabled) {
-      this.stop();
+      this.beginIntent();
+      this.voiceActive = false;
       this.stopMusic();
     }
     this.publishDebug();
@@ -161,50 +148,74 @@ class GameAudioEngine {
   }
 
   prepareMusic() {
-    const context = this.ensureGraph();
-    if (context && !this.musicBuffer) this.musicBuffer = createMusicBuffer(context);
+    const element = this.ensureMusicElement();
+    if (!element || this.musicPrepared) return;
+    this.musicPrepared = true;
+    element.load();
   }
 
-  startMusic() {
-    if (!this.enabled || this.musicSource) return;
-    const context = this.ensureGraph();
-    if (!context) return;
-    if (!this.musicBuffer) this.musicBuffer = createMusicBuffer(context);
-    const source = context.createBufferSource();
-    source.buffer = this.musicBuffer;
-    source.loop = true;
-    source.connect(this.musicGain);
-    this.musicSource = source;
-    const now = context.currentTime;
-    this.musicGain.gain.cancelScheduledValues(now);
-    this.musicGain.gain.setValueAtTime(0, now);
-    this.musicGain.gain.linearRampToValueAtTime(MUSIC_LEVEL, now + 1.5);
-    this.requestedMusicLevel = MUSIC_LEVEL;
-    source.start(now);
+  startMusic({ restart = false } = {}) {
+    if (!this.enabled || !this.musicAllowed) return;
+    const element = this.ensureMusicElement();
+    if (!element) return;
+    if (restart || element.ended) {
+      try {
+        element.currentTime = 0;
+      } catch {
+        // Safari can reject a seek until initial metadata is available.
+      }
+    }
+    this.setMusicLevel(this.voiceActive ? 0 : MUSIC_LEVEL, { immediate: this.voiceActive });
+    const playback = element.play();
+    if (playback?.catch) void playback.catch(() => {});
     this.publishDebug();
   }
 
-  stopMusic() {
-    if (!this.musicSource) return;
-    try {
-      this.musicSource.stop();
-    } catch {
-      // The source may already have ended during page teardown.
+  stopMusic({ rewind = true } = {}) {
+    if (this.musicElement) {
+      this.musicElement.pause();
+      if (rewind) {
+        try {
+          this.musicElement.currentTime = 0;
+        } catch {
+          // Safari can reject a seek until initial metadata is available.
+        }
+      }
     }
-    this.musicSource.disconnect();
-    this.musicSource = null;
     this.requestedMusicLevel = 0;
     if (this.musicGain && this.context) this.musicGain.gain.setValueAtTime(0, this.context.currentTime);
     this.publishDebug();
   }
 
-  setMusicLevel(level) {
+  setMusicAllowed(allowed, { restart = false } = {}) {
+    this.musicAllowed = Boolean(allowed);
+    if (!this.musicAllowed) this.stopMusic();
+    else if (this.context?.state === 'running') this.startMusic({ restart });
+    this.publishDebug();
+  }
+
+  setMusicLevel(level, { immediate = false } = {}) {
     if (!this.musicGain || !this.context) return;
     this.requestedMusicLevel = level;
     const now = this.context.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
-    this.musicGain.gain.setTargetAtTime(level, now, 0.055);
+    if (immediate || level === 0) this.musicGain.gain.setValueAtTime(level, now);
+    else {
+      this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
+      this.musicGain.gain.linearRampToValueAtTime(level, now + MUSIC_FADE_SECONDS);
+    }
     this.publishDebug();
+  }
+
+  suspendMusicForVoice() {
+    this.voiceActive = true;
+    this.setMusicLevel(0, { immediate: true });
+  }
+
+  resumeMusicAfterVoice() {
+    this.voiceActive = false;
+    if (this.musicAllowed && this.enabled) this.startMusic();
+    else this.stopMusic();
   }
 
   playFeedback() {
@@ -265,7 +276,13 @@ class GameAudioEngine {
 
   stop() {
     this.beginIntent();
-    this.setMusicLevel(this.enabled ? MUSIC_LEVEL : 0);
+    this.resumeMusicAfterVoice();
+  }
+
+  shutdown() {
+    this.beginIntent();
+    this.voiceActive = false;
+    this.stopMusic();
   }
 
   async fallbackSpeak(key, intent) {
@@ -311,12 +328,10 @@ class GameAudioEngine {
       if (!result[1]) return false;
     } catch {
       if (intent !== this.intent || !this.enabled) return false;
-      this.setMusicLevel(DUCKED_MUSIC_LEVEL);
       return this.fallbackSpeak(key, intent);
     }
     if (intent !== this.intent || !this.enabled) return false;
 
-    this.setMusicLevel(DUCKED_MUSIC_LEVEL);
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.voiceGain);
@@ -340,8 +355,9 @@ class GameAudioEngine {
 
   async play(key, { feedback = false, onEnded } = {}) {
     const intent = this.beginIntent();
+    this.suspendMusicForVoice();
     const finished = await this.playKey(key, intent, { feedback });
-    if (intent === this.intent) this.setMusicLevel(this.enabled ? MUSIC_LEVEL : 0);
+    if (intent === this.intent) this.resumeMusicAfterVoice();
     if (finished) onEnded?.();
     return finished;
   }
@@ -350,12 +366,13 @@ class GameAudioEngine {
     const intent = this.beginIntent();
     const sequence = keys.filter((key) => VOICE_LINES[key]);
     if (!sequence.length || !this.enabled) return false;
+    this.suspendMusicForVoice();
     let finished = true;
     for (let index = 0; index < sequence.length; index += 1) {
       finished = await this.playKey(sequence[index], intent, { feedback: feedback && index === 0 });
       if (!finished || intent !== this.intent) break;
     }
-    if (intent === this.intent) this.setMusicLevel(this.enabled ? MUSIC_LEVEL : 0);
+    if (intent === this.intent) this.resumeMusicAfterVoice();
     if (finished) onEnded?.();
     return finished;
   }
@@ -368,8 +385,17 @@ class GameAudioEngine {
       pendingCount: this.pending.size,
       currentKey: this.currentKey,
       intent: this.intent,
-      musicActive: Boolean(this.musicSource),
+      musicActive: Boolean(
+        this.musicElement
+        && !this.musicElement.paused
+        && !this.musicElement.ended
+        && this.musicAllowed
+        && !this.voiceActive
+        && this.requestedMusicLevel > 0
+      ),
       musicLevel: this.requestedMusicLevel,
+      musicAllowed: this.musicAllowed,
+      voiceActive: this.voiceActive,
       startLatencyMs: this.lastVoiceStartedAt >= this.lastIntentAt
         ? Math.round((this.lastVoiceStartedAt - this.lastIntentAt) * 10) / 10
         : null,
