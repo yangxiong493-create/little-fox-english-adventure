@@ -121,6 +121,32 @@ const sparseLegacy = normalizeProgress({ completedIds: [16] }, { legacy: true, n
 assert.equal(getStageReadiness(sparseLegacy, 1).unlocked, true, 'Migration should preserve every Stage below the highest legacy Mission reached');
 assert.equal(getStageReadiness(sparseLegacy, 2).unlocked, true, 'Migration should preserve a non-sequential legacy Stage without fabricating mastery');
 
+const completedStageTwo = Array.from({ length: 27 }, (_, index) => index + 1);
+let valleyReadiness = normalizeProgress({ completedIds: completedStageTwo }, { now: startedAt });
+assert.equal(getStageReadiness(valleyReadiness, 3).unlocked, false, 'Completing stories alone should not imply readiness for Color Valley');
+const actionRecognitionBeats = {
+  find: [[16, 0], [16, 1]],
+  give: [[17, 0], [17, 1]],
+  put: [[18, 1], [25, 0]],
+  jump: [[21, 0], [27, 1]],
+  stop: [[20, 0], [21, 1]],
+};
+for (const [itemId, beats] of Object.entries(actionRecognitionBeats)) {
+  for (const [missionId, roundIndex] of beats) {
+    valleyReadiness = evidence(valleyReadiness, {
+      itemId,
+      missionId,
+      roundIndex,
+      occurredAt: startedAt + (++tick * 1_000),
+      choicesCount: 2,
+    });
+  }
+}
+assert.equal(getStageReadiness(valleyReadiness, 3).unlocked, true, 'Five recognized action sounds should unlock Color Valley');
+
+const migratedCompletedForest = normalizeProgress({ completedIds: completedStageTwo }, { legacy: true, now: startedAt });
+assert.equal(getStageReadiness(migratedCompletedForest, 3).unlocked, true, 'Existing families who finished Action Forest should keep moving forward after migration');
+
 let changedContextProgress = { ...normalizeProgress({}, { now: startedAt }), completedIds: Array.from({ length: 16 }, (_, index) => index + 1), legacyUnlockedStage: 2 };
 changedContextProgress = evidence(changedContextProgress, { itemId: 'cat', missionId: 7, roundIndex: 0, occurredAt: startedAt + 1_000 });
 changedContextProgress = evidence(changedContextProgress, { itemId: 'cat', missionId: 9, roundIndex: 0, occurredAt: startedAt + 2_000 });

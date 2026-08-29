@@ -32,7 +32,7 @@ function runMmx(key, line) {
     '--volume', '1',
     '--pitch', '1',
     '--emotion', line.emotion ?? 'happy',
-    '--language', 'English',
+    '--language', line.language ?? 'English',
     '--format', 'mp3',
     '--sample-rate', '44100',
     '--bitrate', '128000',
@@ -58,7 +58,7 @@ async function generateLine(key, line, attempt = 1) {
   try {
     return await runMmx(key, line);
   } catch (error) {
-    const retryable = /rate limit|RPM|too many requests/i.test(error.message);
+    const retryable = /rate limit|RPM|too many requests|network request failed|ECONN|timeout|socket|fetch failed|non-JSON response|server may be experiencing issues/i.test(error.message);
     if (!retryable || attempt >= maxAttempts) throw error;
     const waitMs = 1_500 * (2 ** (attempt - 1));
     console.log(`wait  ${key} (${Math.round(waitMs / 1000)}s)`);

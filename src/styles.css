@@ -418,9 +418,10 @@ button:disabled {
 }
 
 .stage-tabs {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+  width: min(1000px, 100%);
   margin: 8px auto 16px;
 }
 
@@ -429,7 +430,7 @@ button:disabled {
   grid-template-columns: 48px auto;
   grid-template-rows: auto auto;
   align-items: center;
-  min-width: 220px;
+  min-width: 0;
   padding: 8px 17px 8px 10px;
   border: 3px solid rgba(255, 255, 255, 0.75);
   border-radius: 20px;
@@ -477,6 +478,14 @@ button:disabled {
     radial-gradient(circle at 12% 18%, rgba(255, 247, 151, 0.34) 0 4%, transparent 5%),
     radial-gradient(circle at 88% 30%, rgba(159, 236, 190, 0.42) 0 7%, transparent 8%),
     linear-gradient(180deg, rgba(232, 255, 225, 0.8), rgba(211, 245, 193, 0.88)),
+    var(--stage-color);
+}
+
+.world-stage-3 {
+  background:
+    radial-gradient(circle at 12% 25%, rgba(255, 113, 130, 0.2) 0 6%, transparent 7%),
+    radial-gradient(circle at 88% 19%, rgba(87, 185, 232, 0.24) 0 8%, transparent 9%),
+    linear-gradient(180deg, rgba(247, 229, 255, 0.86), rgba(231, 248, 221, 0.9)),
     var(--stage-color);
 }
 
@@ -657,6 +666,13 @@ button:disabled {
     linear-gradient(180deg, rgba(115, 211, 182, 0.9), rgba(238, 249, 195, 0.94));
 }
 
+.lesson-stage-3 {
+  background:
+    radial-gradient(circle at 9% 18%, rgba(255, 116, 137, 0.24) 0 5%, transparent 6%),
+    radial-gradient(circle at 91% 28%, rgba(80, 178, 238, 0.26) 0 6%, transparent 7%),
+    linear-gradient(180deg, rgba(198, 169, 239, 0.88), rgba(235, 248, 202, 0.94));
+}
+
 .lesson-topbar {
   position: relative;
   z-index: 3;
@@ -824,6 +840,18 @@ button:disabled {
 .meet-item.is-touched { transform: translateY(8px) scale(0.97); box-shadow: 0 3px 0 rgba(64, 102, 100, 0.16); }
 .meet-item.is-heard { border-color: rgba(99, 202, 130, 0.76); }
 .meet-item > span:not(.demo-hand) { font-size: clamp(96px, 13vw, 155px); filter: drop-shadow(0 12px 7px rgba(53, 69, 68, 0.14)); }
+.meet-item.item-red_apple > span:not(.demo-hand),
+.meet-item.item-blue_ball > span:not(.demo-hand),
+.meet-item.item-red_ball > span:not(.demo-hand),
+.meet-item.item-blue_apple > span:not(.demo-hand) { font-size: clamp(64px, 8vw, 98px); letter-spacing: -0.18em; }
+.meet-item.size-big > span:not(.demo-hand) { font-size: clamp(126px, 17vw, 185px); }
+.meet-item.size-small > span:not(.demo-hand) { font-size: clamp(54px, 7vw, 78px); }
+.item-big > span:not(.demo-hand),
+.item-big .choice-emoji,
+.item-big.echo-word-card span { color: #f28a4e; }
+.item-small > span:not(.demo-hand),
+.item-small .choice-emoji,
+.item-small.echo-word-card span { color: #8a70dc; }
 .meet-item b { color: var(--ink); font-size: clamp(25px, 3vw, 38px); }
 .meet-item small { position: absolute; top: 16px; right: 16px; display: grid; width: 48px; height: 48px; place-items: center; border-radius: 16px; background: white; box-shadow: var(--soft-shadow); font-size: 21px; }
 .meet-count-6 .meet-item { width: 145px; min-height: 190px; border-radius: 30px; }
@@ -857,6 +885,7 @@ button:disabled {
 
 .big-audio-button span { font-size: 25px; }
 .big-audio-button b { font-size: 14px; }
+.big-audio-button:disabled { opacity: 0.55; }
 
 .challenge-scene {
   position: relative;
@@ -875,6 +904,7 @@ button:disabled {
 
 .scene-destination { height: 62px; font-size: 48px; letter-spacing: 0.12em; }
 .forest-destination { font-size: 42px; }
+.valley-destination { color: #634f86; font-size: 42px; font-weight: 950; letter-spacing: 0.04em; }
 .action-destination { position: relative; width: min(430px, 100%); margin: 0 auto 8px; border: 4px solid transparent; border-radius: 22px; background: rgba(255, 255, 255, 0.22); cursor: default; }
 .action-destination.is-ready { border-color: #ffe16c; background: rgba(255, 251, 205, 0.92); box-shadow: 0 0 0 9px rgba(255, 225, 108, 0.25), var(--soft-shadow); cursor: pointer; animation: target-breathe 1.25s ease-in-out infinite; }
 .action-destination i { position: absolute; right: 12px; bottom: -22px; font-size: 39px; font-style: normal; animation: hand-tap 1s ease-in-out infinite; }
@@ -917,6 +947,12 @@ button:disabled {
 
 .choice-card:active { transform: translateY(7px); box-shadow: 0 3px 0 rgba(65, 105, 105, 0.2); }
 .choice-emoji { position: relative; z-index: 2; font-size: clamp(86px, 11vw, 135px); filter: drop-shadow(0 11px 7px rgba(40, 58, 56, 0.13)); }
+.choice-card.item-red_apple .choice-emoji,
+.choice-card.item-blue_ball .choice-emoji,
+.choice-card.item-red_ball .choice-emoji,
+.choice-card.item-blue_apple .choice-emoji { font-size: clamp(58px, 7.5vw, 92px); letter-spacing: -0.18em; }
+.choice-card.size-big .choice-emoji { font-size: clamp(126px, 15vw, 175px); }
+.choice-card.size-small .choice-emoji { font-size: clamp(52px, 6vw, 72px); }
 .choice-card b { position: relative; z-index: 2; color: #315566; font-size: 22px; }
 .choice-card.is-wrong { animation: gentle-shake 420ms ease; }
 .choice-card.is-hint { animation: target-breathe 1.25s ease-in-out infinite; }
@@ -936,6 +972,8 @@ button:disabled {
 .mode-forest-find .choice-card.is-correct .choice-emoji { animation: reward-pop 650ms ease both; }
 .mode-forest-give .choice-card.is-correct .choice-emoji { animation: gift-fly 700ms ease-in-out; }
 .mode-forest-put .choice-card.is-correct .choice-emoji { animation: drop-in 700ms ease-in; }
+.mode-valley-color .choice-card.is-correct .choice-emoji,
+.mode-valley-size .choice-card.is-correct .choice-emoji { animation: reward-pop 650ms ease both; }
 .target-jump.status-success .forest-action-preview span,
 .target-jump.status-assisted .forest-action-preview span { animation: action-jump 700ms ease-in-out; }
 .target-stop.status-success .forest-action-preview span,
@@ -967,6 +1005,12 @@ button:disabled {
 .echo-fox { font-size: 125px; filter: drop-shadow(0 15px 8px rgba(64, 83, 74, 0.16)); }
 .echo-word-card { display: grid; min-height: 270px; place-items: center; padding: 18px; border: 7px solid white; border-radius: 38px; box-shadow: var(--shadow); }
 .echo-word-card span { font-size: 120px; }
+.echo-word-card.item-red_apple span,
+.echo-word-card.item-blue_ball span,
+.echo-word-card.item-red_ball span,
+.echo-word-card.item-blue_apple span { font-size: 82px; letter-spacing: -0.18em; }
+.echo-word-card.size-big span { font-size: 155px; }
+.echo-word-card.size-small span { font-size: 68px; }
 .echo-word-card b { font-size: 38px; }
 .sound-waves { position: absolute; top: 36%; left: 145px; display: flex; align-items: center; gap: 5px; height: 70px; }
 .sound-waves i { width: 7px; height: 16px; border-radius: 99px; background: var(--orange); }
@@ -1251,10 +1295,22 @@ button:disabled {
   .choice-card { width: min(31vw, 205px); min-height: 200px; border-width: 5px; }
   .choice-count-3 .choice-card { width: min(29vw, 190px); }
   .choice-emoji { font-size: clamp(66px, 18vw, 105px); }
+  .choice-card.item-red_apple .choice-emoji,
+  .choice-card.item-blue_ball .choice-emoji,
+  .choice-card.item-red_ball .choice-emoji,
+  .choice-card.item-blue_apple .choice-emoji { font-size: clamp(48px, 11vw, 76px); }
+  .choice-card.size-big .choice-emoji { font-size: clamp(105px, 24vw, 145px); }
+  .choice-card.size-small .choice-emoji { font-size: clamp(42px, 10vw, 62px); }
   .echo-visual { grid-template-columns: 95px 1fr; padding: 20px; }
   .echo-fox { font-size: 92px; }
   .echo-word-card { min-height: 220px; }
   .echo-word-card span { font-size: 92px; }
+  .echo-word-card.item-red_apple span,
+  .echo-word-card.item-blue_ball span,
+  .echo-word-card.item-red_ball span,
+  .echo-word-card.item-blue_apple span { font-size: 68px; }
+  .echo-word-card.size-big span { font-size: 125px; }
+  .echo-word-card.size-small span { font-size: 56px; }
   .sound-waves { left: 105px; }
   .badge-grid { grid-template-columns: repeat(3, 1fr); }
   .parent-stats { grid-template-columns: 1fr; }
@@ -1265,6 +1321,7 @@ button:disabled {
   .top-actions .icon-button { width: 56px; height: 56px; min-width: 56px; min-height: 56px; }
   .welcome-art { min-height: 310px; }
   .hero-island { padding: 20px; }
+  .stage-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stage-tabs button small { display: none; }
   .world-heading { align-items: flex-start; }
   .stage-counter { min-width: 84px; padding: 6px 9px; }
@@ -1279,6 +1336,12 @@ button:disabled {
   .choice-card { width: 29vw; min-height: 170px; }
   .choice-card b { font-size: 16px; }
   .choice-emoji { font-size: 59px; }
+  .choice-card.item-red_apple .choice-emoji,
+  .choice-card.item-blue_ball .choice-emoji,
+  .choice-card.item-red_ball .choice-emoji,
+  .choice-card.item-blue_apple .choice-emoji { font-size: 45px; }
+  .choice-card.size-big .choice-emoji { font-size: 92px; }
+  .choice-card.size-small .choice-emoji { font-size: 38px; }
   .badge-grid { grid-template-columns: repeat(2, 1fr); }
 }
 

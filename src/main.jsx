@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ITEMS, MISSIONS, STAGES, VOICE_LINES, getMission, getVoiceText } from './gameData.js';
+import { ITEMS, MISSIONS, STAGES, VOICE_LINES, getMission } from './gameData.js';
+import { gameAudio } from './audioEngine.js';
 import {
   LEARNING_STATUS,
   getLearningState,
@@ -20,8 +21,17 @@ const LESSON_STEPS = [
   { id: 'reward', label: '世界变了', icon: '🌟' },
 ];
 
-const PROGRESS_STORAGE_KEY = 'little-fox-progress-v3';
-const LEGACY_PROGRESS_STORAGE_KEY = 'little-fox-progress-v2';
+const PROGRESS_STORAGE_KEY = 'little-fox-progress-v4';
+const LEGACY_PROGRESS_STORAGE_KEYS = ['little-fox-progress-v3', 'little-fox-progress-v2'];
+const CRITICAL_VOICE_KEYS = [
+  'zh_welcome', 'welcome', 'zh_meet', 'zh_listen_choose', 'zh_try_again',
+  'zh_together', 'zh_echo', 'zh_reward', 'reward_done',
+  ...MISSIONS.slice(0, 3).flatMap((mission) => [
+    mission.introAudio,
+    ...mission.meet.map((itemId) => ITEMS[itemId].audio),
+    ...mission.rounds.map((roundData) => roundData.audio),
+  ]),
+];
 
 function parseStoredProgress(raw) {
   if (!raw) return null;
@@ -34,81 +44,57 @@ function parseStoredProgress(raw) {
 
 function readSavedProgress() {
   try {
+    if (import.meta.env.DEV) {
+      const previewMissionId = Number(new URLSearchParams(window.location.search).get('previewMission'));
+      const previewMission = getMission(previewMissionId);
+      if (previewMission) {
+        return normalizeProgress({
+          completedIds: MISSIONS.filter((mission) => mission.id < previewMissionId).map((mission) => mission.id),
+          lastMissionId: Math.max(1, previewMissionId - 1),
+          legacyUnlockedStage: previewMission.stage,
+          audioOn: true,
+        });
+      }
+    }
     const current = parseStoredProgress(window.localStorage.getItem(PROGRESS_STORAGE_KEY));
     if (current) return normalizeProgress(current);
-    const legacy = parseStoredProgress(window.localStorage.getItem(LEGACY_PROGRESS_STORAGE_KEY));
-    return normalizeProgress(legacy || {}, { legacy: Boolean(legacy) });
+    for (const key of LEGACY_PROGRESS_STORAGE_KEYS) {
+      const legacy = parseStoredProgress(window.localStorage.getItem(key));
+      if (legacy) return normalizeProgress(legacy, { legacy: true });
+    }
+    return normalizeProgress();
   } catch {
     return normalizeProgress();
   }
 }
 
-function fallbackSpeak(text, onEnded) {
-  if (!text || !('speechSynthesis' in window)) return false;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'en-US';
-  utterance.rate = 0.82;
-  utterance.pitch = 1.08;
-  utterance.onend = () => onEnded?.();
-  utterance.onerror = () => onEnded?.();
-  window.speechSynthesis.speak(utterance);
-  return true;
-}
-
 function useGameAudio(audioOn) {
-  const audioRef = useRef(null);
-  const playTokenRef = useRef(0);
-  const audioOnRef = useRef(audioOn);
-  audioOnRef.current = audioOn;
-
-  const stop = useCallback(() => {
-    playTokenRef.current += 1;
-    if (audioRef.current) {
-      audioRef.current.onended = null;
-      audioRef.current.onerror = null;
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-    window.speechSynthesis?.cancel();
-  }, []);
-
-  const play = useCallback((key, { onEnded } = {}) => {
-    if (!audioOnRef.current || !key) {
-      onEnded?.();
-      return false;
-    }
-    const text = getVoiceText(key);
-    stop();
-    const token = playTokenRef.current;
-    const player = audioRef.current || new Audio();
-    audioRef.current = player;
-    player.preload = 'auto';
-    player.src = `${import.meta.env.BASE_URL}audio/voice/${key}.mp3`;
-    let fallbackStarted = false;
-    const finish = () => {
-      if (token === playTokenRef.current) onEnded?.();
-    };
-    const fallback = () => {
-      if (fallbackStarted || token !== playTokenRef.current || !audioOnRef.current) return;
-      fallbackStarted = true;
-      if (!fallbackSpeak(text, finish)) finish();
-    };
-    player.onended = finish;
-    player.onerror = fallback;
-    const promise = player.play();
-    if (promise?.catch) promise.catch((error) => {
-      if (error?.name !== 'AbortError') fallback();
-    });
-    return true;
-  }, [stop]);
+  const play = useCallback((key, options) => gameAudio.play(key, options), []);
+  const playSequence = useCallback((keys, options) => gameAudio.playSequence(keys, options), []);
+  const stop = useCallback(() => gameAudio.stop(), []);
+  const unlock = useCallback((options) => gameAudio.unlock(options), []);
 
   useEffect(() => {
-    if (!audioOn) stop();
-  }, [audioOn, stop]);
+    gameAudio.setEnabled(audioOn);
+  }, [audioOn]);
+
+  useEffect(() => {
+    void gameAudio.preload(CRITICAL_VOICE_KEYS, { concurrency: 4 });
+    const preloadAll = () => {
+      gameAudio.prepareMusic();
+      void gameAudio.preload(Object.keys(VOICE_LINES), { concurrency: 4 });
+    };
+    const idleId = 'requestIdleCallback' in window
+      ? window.requestIdleCallback(preloadAll, { timeout: 1800 })
+      : window.setTimeout(preloadAll, 500);
+    return () => {
+      if ('cancelIdleCallback' in window) window.cancelIdleCallback(idleId);
+      else window.clearTimeout(idleId);
+    };
+  }, []);
 
   useEffect(() => stop, [stop]);
-  return { play, stop };
+  return { play, playSequence, stop, unlock };
 }
 
 export default function App() {
@@ -121,7 +107,7 @@ export default function App() {
   const [parentOpen, setParentOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [clock, setClock] = useState(() => Date.now());
-  const { play, stop } = useGameAudio(progress.audioOn);
+  const { play, playSequence, stop, unlock } = useGameAudio(progress.audioOn);
 
   const completedSet = useMemo(() => new Set(progress.completedIds), [progress.completedIds]);
   const nextIncomplete = MISSIONS.find((mission) => !completedSet.has(mission.id)) || null;
@@ -131,6 +117,22 @@ export default function App() {
     [progress, nextIncomplete, clock],
   );
   const activeMission = missionId ? getMission(missionId) : null;
+
+  useEffect(() => {
+    if (!nextMission) return;
+    const missionVoiceKeys = [
+      nextMission.introAudio,
+      ...nextMission.meet.flatMap((itemId) => [ITEMS[itemId].audio, ITEMS[itemId].successAudio]),
+      ...nextMission.rounds.flatMap((roundData) => [
+        roundData.audio,
+        ITEMS[roundData.target].audio,
+        ITEMS[roundData.target].successAudio,
+      ]),
+      ITEMS[nextMission.echo].audio,
+      ITEMS[nextMission.echo].successAudio,
+    ];
+    void gameAudio.preload(missionVoiceKeys, { concurrency: 4 });
+  }, [nextMission]);
 
   useEffect(() => {
     try {
@@ -168,11 +170,16 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const toggleAudio = () => setProgress((value) => ({ ...value, audioOn: !value.audioOn }));
+  const setAudioPreference = (nextAudioOn, { feedback = false } = {}) => {
+    gameAudio.setEnabled(nextAudioOn);
+    if (nextAudioOn) void unlock({ feedback });
+    setProgress((value) => ({ ...value, audioOn: nextAudioOn }));
+  };
+  const toggleAudio = () => setAudioPreference(!progress.audioOn, { feedback: !progress.audioOn });
 
   const openMap = () => {
     setScreen('map');
-    play('welcome');
+    void playSequence(['zh_welcome', 'welcome'], { feedback: true });
   };
 
   const startMission = (id) => {
@@ -191,7 +198,7 @@ export default function App() {
     }));
     setMissionId(id);
     setScreen('lesson');
-    play(mission.introAudio);
+    void play(mission.introAudio, { feedback: true });
   };
 
   const recordExposureEvent = useCallback((evidence) => {
@@ -253,6 +260,7 @@ export default function App() {
           key={activeMission.id}
           mission={activeMission}
           play={play}
+          playSequence={playSequence}
           onClose={goMap}
           onComplete={completeMission}
           onExposure={recordExposureEvent}
@@ -277,7 +285,7 @@ export default function App() {
         <ParentPanel
           progress={progress}
           now={clock}
-          setAudioOn={(audioOn) => setProgress((value) => ({ ...value, audioOn }))}
+          setAudioOn={(audioOn) => setAudioPreference(audioOn, { feedback: audioOn })}
           onClose={() => setParentOpen(false)}
         />
       )}
@@ -464,7 +472,7 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
   );
 }
 
-function LessonScreen({ mission, play, onClose, onComplete, onExposure, onEvidence, alreadyCompleted }) {
+function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExposure, onEvidence, alreadyCompleted }) {
   const [stepIndex, setStepIndex] = useState(0);
   const completionRecorded = useRef(false);
   const replayAtStart = useRef(alreadyCompleted).current;
@@ -475,24 +483,24 @@ function LessonScreen({ mission, play, onClose, onComplete, onExposure, onEviden
 
   const goToMeet = () => {
     onExposure({ itemId: mission.meet[0], missionId: mission.id });
-    play(ITEMS[mission.meet[0]].audio);
     setStepIndex(1);
+    void playSequence(['zh_meet', ITEMS[mission.meet[0]].audio], { feedback: true });
   };
   const goToChallenge = () => {
-    play(mission.rounds[0].audio);
     setStepIndex(2);
+    void playSequence(['zh_listen_choose', mission.rounds[0].audio], { feedback: true });
   };
   const goToEcho = () => {
-    play('guide_say');
     setStepIndex(3);
+    void play('zh_echo');
   };
   const goToReward = () => {
     if (!completionRecorded.current) {
       completionRecorded.current = true;
       onComplete(mission.id);
     }
-    play('reward_done');
     setStepIndex(4);
+    void playSequence(['zh_reward', 'reward_done']);
   };
 
   return (
@@ -514,7 +522,7 @@ function LessonScreen({ mission, play, onClose, onComplete, onExposure, onEviden
       <div className="lesson-stage page-pad" key={stepIndex}>
         {stepIndex === 0 && <StoryStep mission={mission} play={play} onNext={goToMeet} />}
         {stepIndex === 1 && <MeetStep mission={mission} play={play} onExposure={onExposure} onNext={goToChallenge} />}
-        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} onEvidence={onEvidence} onNext={goToEcho} />}
+        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} playSequence={playSequence} onEvidence={onEvidence} onNext={goToEcho} />}
         {stepIndex === 3 && <EchoStep mission={mission} play={play} onNext={goToReward} />}
         {stepIndex === 4 && <RewardStep mission={mission} onMap={onClose} replay={replayAtStart} />}
       </div>
@@ -536,7 +544,7 @@ function StoryStep({ mission, play, onNext }) {
         <h2>{mission.storyGoal}</h2>
         <div className="guide-card">
           <span className="guide-character">🦊</span>
-          <div><p lang="en">{VOICE_LINES[mission.introAudio].text}</p><button className="listen-button" onClick={() => play(mission.introAudio)} type="button" aria-label="再听一次">🔊</button></div>
+          <div><p lang="en">{VOICE_LINES[mission.introAudio].text}</p><button className="listen-button" onClick={() => void play(mission.introAudio, { feedback: true })} type="button" aria-label="再听一次">🔊</button></div>
         </div>
         <button className="primary-cta compact" onClick={onNext} type="button" data-testid="story-next">
           <span className="cta-icon">🖐️</span><span><b>我来帮忙！</b><small>Let’s go!</small></span><span className="cta-arrow">›</span>
@@ -551,29 +559,39 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   const [lastTouched, setLastTouched] = useState('');
   const [handTarget, setHandTarget] = useState('');
   const touchTimerRef = useRef(null);
+  const guidanceTimersRef = useRef([]);
   const requiredPerItem = mission.meetRepeats;
   const totalRequired = mission.meet.length * requiredPerItem;
   const totalTouches = mission.meet.reduce((sum, itemId) => sum + Math.min(touchesByItem[itemId] || 0, requiredPerItem), 0);
   const nextItemId = mission.meet.find((itemId) => (touchesByItem[itemId] || 0) < requiredPerItem) || '';
+  const nextItemTouches = nextItemId ? touchesByItem[nextItemId] || 0 : 0;
   const ready = totalTouches >= totalRequired;
 
   useEffect(() => {
+    guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    guidanceTimersRef.current = [];
     if (ready || !nextItemId) return undefined;
-    const handTimer = window.setTimeout(() => setHandTarget(nextItemId), 3200);
+    const handTimer = window.setTimeout(() => setHandTarget(nextItemId), 5500);
     const replayTimer = window.setTimeout(() => {
       onExposure({ itemId: nextItemId, missionId: mission.id });
-      play(ITEMS[nextItemId].audio);
-    }, 3600);
+      void play(ITEMS[nextItemId].audio);
+    }, 5900);
+    guidanceTimersRef.current = [handTimer, replayTimer];
     return () => {
       window.clearTimeout(handTimer);
       window.clearTimeout(replayTimer);
     };
-  }, [mission.id, nextItemId, onExposure, play, ready, totalTouches]);
+  }, [mission.id, nextItemId, nextItemTouches, onExposure, play, ready]);
 
-  useEffect(() => () => window.clearTimeout(touchTimerRef.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(touchTimerRef.current);
+    guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   const touchItem = (itemId) => {
     const item = ITEMS[itemId];
+    guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    guidanceTimersRef.current = [];
     setLastTouched(itemId);
     setHandTarget('');
     setTouchesByItem((value) => ({
@@ -581,7 +599,7 @@ function MeetStep({ mission, play, onExposure, onNext }) {
       [itemId]: Math.min((value[itemId] || 0) + 1, requiredPerItem),
     }));
     onExposure({ itemId, missionId: mission.id });
-    play(item.audio);
+    void play(item.audio, { feedback: true });
     window.clearTimeout(touchTimerRef.current);
     touchTimerRef.current = window.setTimeout(() => setLastTouched(''), 600);
   };
@@ -601,7 +619,7 @@ function MeetStep({ mission, play, onExposure, onNext }) {
           return (
             <button
               key={itemId}
-              className={`meet-item tone-${item.tone} ${lastTouched === itemId ? 'is-touched' : ''} ${(touchesByItem[itemId] || 0) >= requiredPerItem ? 'is-heard' : ''}`}
+              className={`meet-item item-${item.id} tone-${item.tone} size-${item.scale || 'normal'} ${lastTouched === itemId ? 'is-touched' : ''} ${(touchesByItem[itemId] || 0) >= requiredPerItem ? 'is-heard' : ''}`}
               onClick={() => touchItem(itemId)}
               type="button"
               data-testid={`meet-${itemId}`}
@@ -624,7 +642,7 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   );
 }
 
-function ChallengeStep({ mission, play, onEvidence, onNext }) {
+function ChallengeStep({ mission, play, playSequence, onEvidence, onNext }) {
   const [roundIndex, setRoundIndex] = useState(0);
   const roundData = mission.rounds[roundIndex];
   const transitionTimerRef = useRef(null);
@@ -643,8 +661,8 @@ function ChallengeStep({ mission, play, onEvidence, onNext }) {
     const nextIndex = roundIndex + 1;
     transitionTimerRef.current = window.setTimeout(() => {
       setRoundIndex(nextIndex);
-      play(mission.rounds[nextIndex].audio);
-    }, 750);
+      void play(mission.rounds[nextIndex].audio);
+    }, 240);
   };
 
   return (
@@ -652,39 +670,48 @@ function ChallengeStep({ mission, play, onEvidence, onNext }) {
       <div className="round-dots" aria-label={`第 ${roundIndex + 1} 小步，共 ${mission.rounds.length} 小步`}>
         {mission.rounds.map((_, index) => <i key={index} className={index < roundIndex ? 'is-done' : index === roundIndex ? 'is-current' : ''} />)}
       </div>
-      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} roundIndex={roundIndex} play={play} onEvidence={onEvidence} onSolved={solved} />
+      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} roundIndex={roundIndex} play={play} playSequence={playSequence} onEvidence={onEvidence} onSolved={solved} />
     </div>
   );
 }
 
-function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved }) {
+function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvidence, onSolved }) {
   const [tries, setTries] = useState(0);
   const [hintLevel, setHintLevel] = useState(0);
+  const [activityTick, setActivityTick] = useState(0);
   const [wrongChoice, setWrongChoice] = useState('');
   const [status, setStatus] = useState('ready');
   const [selectedResult, setSelectedResult] = useState(null);
   const timerRef = useRef(null);
   const wrongTimerRef = useRef(null);
   const evidenceRecordedRef = useRef(false);
+  const finishingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (status !== 'ready') return undefined;
-    const replayTimer = window.setTimeout(() => play(round.audio), 3500);
-    const motionTimer = window.setTimeout(() => setHintLevel(1), 6500);
-    const spotlightTimer = window.setTimeout(() => setHintLevel(2), 10000);
+    const replayTimer = window.setTimeout(() => void play(round.audio), 8200);
+    const motionTimer = window.setTimeout(() => setHintLevel(1), 11000);
+    const spotlightTimer = window.setTimeout(() => setHintLevel(2), 14000);
     return () => {
       window.clearTimeout(replayTimer);
       window.clearTimeout(motionTimer);
       window.clearTimeout(spotlightTimer);
     };
-  }, [play, round.audio, status]);
+  }, [activityTick, play, round.audio, status, tries]);
 
-  useEffect(() => () => {
-    window.clearTimeout(timerRef.current);
-    window.clearTimeout(wrongTimerRef.current);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timerRef.current);
+      window.clearTimeout(wrongTimerRef.current);
+    };
   }, []);
 
   const finish = (assisted = false, result = { attempts: tries, hintLevel }) => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     if (!evidenceRecordedRef.current) {
       evidenceRecordedRef.current = true;
       onEvidence({
@@ -705,12 +732,15 @@ function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved
       'forest-give': 'yes_give',
       'forest-put': 'yes_put',
     }[round.mode];
-    play(actionSuccessAudio || ITEMS[round.target].successAudio);
-    timerRef.current = window.setTimeout(onSolved, 950);
+    void play(actionSuccessAudio || ITEMS[round.target].successAudio, { feedback: true }).then(() => {
+      if (!mountedRef.current) return;
+      timerRef.current = window.setTimeout(onSolved, 180);
+    });
   };
 
   const choose = (itemId) => {
     if (status !== 'ready') return;
+    setActivityTick((value) => value + 1);
     if (itemId === round.target) {
       if (round.mode === 'forest-give' || round.mode === 'forest-put') {
         setSelectedResult({ attempts: tries, hintLevel });
@@ -727,15 +757,16 @@ function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved
     wrongTimerRef.current = window.setTimeout(() => setWrongChoice(''), 520);
     if (nextTries === 1) {
       setHintLevel(1);
-      play('guide_again');
+      void playSequence(['zh_try_again', round.audio], { feedback: true });
     } else if (nextTries === 2) {
       setHintLevel(2);
-      play(round.audio);
+      void play(round.audio, { feedback: true });
     } else {
       setStatus('helping');
       setHintLevel(3);
-      play('guide_together');
-      timerRef.current = window.setTimeout(() => finish(true, { attempts: nextTries, hintLevel: 3 }), 1050);
+      void play('zh_together', { feedback: true }).then(() => {
+        if (mountedRef.current) finish(true, { attempts: nextTries, hintLevel: 3 });
+      });
     }
   };
 
@@ -749,7 +780,7 @@ function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved
       <header className="activity-title">
         <span className="step-kicker">仔细听，小狐在说什么？</span>
         <h2 lang="en">{round.prompt}</h2>
-        <button className="big-audio-button" onClick={() => play(round.audio)} type="button"><span>🔊</span><b>再听一次</b></button>
+        <button className="big-audio-button" onClick={() => { setActivityTick((value) => value + 1); void play(round.audio, { feedback: true }); }} type="button" disabled={status !== 'ready'}><span>🔊</span><b>再听一次</b></button>
       </header>
 
       <div className="challenge-scene">
@@ -763,6 +794,8 @@ function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved
         {round.mode === 'forest-put' && <button className={`scene-destination forest-destination action-destination ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label="把宝物放进树洞" disabled={status !== 'placing'}>🌳　📥　✨{status === 'placing' && <i>☝️</i>}</button>}
         {round.mode === 'forest-action' && <div className="scene-destination forest-action-preview"><span>🦊</span><i>🍄　·　·　🛑</i></div>}
         {round.mode === 'forest-color' && <div className="scene-destination forest-destination">🌿　✨　🌿</div>}
+        {round.mode === 'valley-color' && <div className="scene-destination valley-destination">🌈　✨　🎨</div>}
+        {round.mode === 'valley-size' && <div className="scene-destination valley-destination">●　✨　•</div>}
         <div className={`choice-row choice-count-${round.choices.length}`} role="group" aria-label="听声音选择">
           {round.choices.map((itemId) => {
             const item = ITEMS[itemId];
@@ -770,7 +803,7 @@ function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved
             return (
               <button
                 key={itemId}
-                className={`choice-card tone-${item.tone} ${wrongChoice === itemId ? 'is-wrong' : ''} ${isTarget && hintLevel >= 1 ? 'is-hint' : ''} ${isTarget && status === 'placing' ? 'is-selected' : ''} ${isTarget && (status === 'success' || status === 'assisted') ? 'is-correct' : ''}`}
+                className={`choice-card item-${item.id} tone-${item.tone} size-${item.scale || 'normal'} ${wrongChoice === itemId ? 'is-wrong' : ''} ${isTarget && hintLevel >= 1 ? 'is-hint' : ''} ${isTarget && status === 'placing' ? 'is-selected' : ''} ${isTarget && (status === 'success' || status === 'assisted') ? 'is-correct' : ''}`}
                 onClick={() => choose(itemId)}
                 type="button"
                 data-testid={`choice-${itemId}`}
@@ -797,21 +830,36 @@ function EchoStep({ mission, play, onNext }) {
   const [heard, setHeard] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [finishing, setFinishing] = useState(false);
-  const finishTimerRef = useRef(null);
+  const finishingRef = useRef(false);
+  const listenTokenRef = useRef(0);
+  const mountedRef = useRef(true);
 
-  useEffect(() => () => window.clearTimeout(finishTimerRef.current), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const listen = () => {
+    const token = listenTokenRef.current + 1;
+    listenTokenRef.current = token;
     setHeard(true);
-    const started = play(item.audio, { onEnded: () => setIsPlaying(false) });
-    setIsPlaying(started);
+    setIsPlaying(true);
+    void play(item.audio, { feedback: true }).finally(() => {
+      if (mountedRef.current && token === listenTokenRef.current) setIsPlaying(false);
+    });
   };
   const finish = (saidIt) => {
-    if (finishing) return;
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    listenTokenRef.current += 1;
     setFinishing(true);
+    setIsPlaying(false);
     if (saidIt) {
-      play(item.successAudio);
-      finishTimerRef.current = window.setTimeout(onNext, 850);
+      void play(item.successAudio, { feedback: true }).then(() => {
+        if (mountedRef.current) onNext();
+      });
     } else {
       onNext();
     }
@@ -822,7 +870,7 @@ function EchoStep({ mission, play, onNext }) {
       <div className="echo-visual">
         <span className="echo-fox">🦊</span>
         <div className={`sound-waves ${isPlaying ? 'is-playing' : ''}`}><i /><i /><i /><i /><i /><i /><i /></div>
-        <div className={`echo-word-card tone-${item.tone}`}><span>{item.emoji}</span><b lang="en">{item.display}</b></div>
+        <div className={`echo-word-card item-${item.id} tone-${item.tone} size-${item.scale || 'normal'}`}><span>{item.emoji}</span><b lang="en">{item.display}</b></div>
       </div>
       <div className="echo-panel">
         <span className="step-kicker">想说就说，不说也能继续</span>

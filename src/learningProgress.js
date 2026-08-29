@@ -1,6 +1,6 @@
 import { ITEMS, MISSIONS } from './gameData.js';
 
-export const PROGRESS_SCHEMA_VERSION = 3;
+export const PROGRESS_SCHEMA_VERSION = 4;
 
 export const LEARNING_STATUS = {
   unseen: { rank: 0, label: '还没遇见', shortLabel: '未接触', icon: '○' },
@@ -20,6 +20,12 @@ export const STAGE_READINESS_RULES = {
   2: {
     sourceStage: 1,
     itemIds: ['apple', 'ball', 'cat', 'dog', 'car', 'milk'],
+    minimumStatus: 'recognized',
+    requiredCount: 5,
+  },
+  3: {
+    sourceStage: 2,
+    itemIds: ['find', 'give', 'put', 'jump', 'stop', 'red', 'blue'],
     minimumStatus: 'recognized',
     requiredCount: 5,
   },
@@ -142,11 +148,14 @@ export function normalizeProgress(saved = {}, { legacy = false, now = Date.now()
   if (legacy || completedIds.length > 0) markLegacyEncounters(learning, completedIds, now);
 
   const lastMissionId = validMissionId(saved.lastMissionId) ? saved.lastMissionId : null;
-  const legacyUnlockedStage = Number.isInteger(saved.legacyUnlockedStage)
+  const migrating = legacy || (Number.isInteger(saved.schemaVersion) && saved.schemaVersion < PROGRESS_SCHEMA_VERSION);
+  const savedUnlockedStage = Number.isInteger(saved.legacyUnlockedStage)
     ? Math.max(0, saved.legacyUnlockedStage)
-    : legacy
-      ? inferLegacyUnlockedStage(completedIds)
-      : Math.max(0, ...completedIds.map((id) => MISSIONS[id - 1]?.stage || 0));
+    : 0;
+  const inferredUnlockedStage = migrating
+    ? inferLegacyUnlockedStage(completedIds)
+    : Math.max(0, ...completedIds.map((id) => MISSIONS[id - 1]?.stage || 0));
+  const legacyUnlockedStage = Math.max(savedUnlockedStage, inferredUnlockedStage);
 
   return {
     schemaVersion: PROGRESS_SCHEMA_VERSION,

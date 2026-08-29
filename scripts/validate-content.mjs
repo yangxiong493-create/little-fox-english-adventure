@@ -10,10 +10,11 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-check(MISSIONS.length === 27, `Expected 27 missions, found ${MISSIONS.length}`);
-check(new Set(MISSIONS.map((mission) => mission.id)).size === 27, 'Mission IDs must be unique');
-check(STAGES.length === 3, `Expected 3 stages, found ${STAGES.length}`);
-check(Object.keys(VOICE_LINES).length === 83, `Expected 83 voice clips, found ${Object.keys(VOICE_LINES).length}`);
+check(MISSIONS.length === 32, `Expected 32 missions, found ${MISSIONS.length}`);
+check(new Set(MISSIONS.map((mission) => mission.id)).size === 32, 'Mission IDs must be unique');
+check(STAGES.length === 4, `Expected 4 stages, found ${STAGES.length}`);
+check(Object.keys(ITEMS).length === 23, `Expected 23 items, found ${Object.keys(ITEMS).length}`);
+check(Object.keys(VOICE_LINES).length === 117, `Expected 117 voice clips, found ${Object.keys(VOICE_LINES).length}`);
 
 for (const [itemId, item] of Object.entries(ITEMS)) {
   check(item.id === itemId, `Item key ${itemId} does not match its ID`);
@@ -23,7 +24,7 @@ for (const [itemId, item] of Object.entries(ITEMS)) {
 
 for (const [index, mission] of MISSIONS.entries()) {
   check(mission.id === index + 1, `Mission IDs must be contiguous at ${mission.title}`);
-  check([0, 1, 2].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
+  check([0, 1, 2, 3].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
   check(mission.introAudio in VOICE_LINES, `Mission ${mission.id} has an unknown intro audio key`);
   check(mission.meet.length > 0, `Mission ${mission.id} needs at least one Meet item`);
   check(new Set(mission.meet).size === mission.meet.length, `Mission ${mission.id} has duplicate Meet items`);
@@ -52,6 +53,7 @@ for (const [index, mission] of MISSIONS.entries()) {
 
 for (const [key, line] of Object.entries(VOICE_LINES)) {
   check(typeof line.text === 'string' && line.text.trim(), `Voice line ${key} is empty`);
+  check(line.language === undefined || ['English', 'Chinese'].includes(line.language), `Voice line ${key} has an unsupported language`);
   const filePath = path.join(projectDir, 'public', 'audio', 'voice', `${key}.mp3`);
   const info = await stat(filePath);
   check(info.size > 1_000, `Voice file ${key}.mp3 is unexpectedly small`);
