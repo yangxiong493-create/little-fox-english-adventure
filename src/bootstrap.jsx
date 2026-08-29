@@ -13,7 +13,19 @@ async function registerPwa() {
   if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
   try {
     const hadController = Boolean(navigator.serviceWorker.controller);
-    const registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL });
+    let reloadingForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      window.location.reload();
+    });
+
+    const registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+      scope: import.meta.env.BASE_URL,
+      // GitHub Pages caches files at the edge. Always bypass that cache when
+      // checking the worker so an installed iPad sees a new release promptly.
+      updateViaCache: 'none',
+    });
     if (registration.waiting) window.dispatchEvent(new Event('little-fox-update-ready'));
     const watchWorker = (worker) => {
       if (!worker) return;
@@ -26,8 +38,15 @@ async function registerPwa() {
     if (!hadController) {
       await navigator.serviceWorker.ready;
       window.dispatchEvent(new Event('little-fox-offline-ready'));
+    } else {
+      await registration.update();
     }
-    window.setInterval(() => registration.update(), 60 * 60 * 1000);
+
+    const updateWhenVisible = () => {
+      if (document.visibilityState === 'visible') void registration.update();
+    };
+    document.addEventListener('visibilitychange', updateWhenVisible);
+    window.setInterval(() => void registration.update(), 30 * 60 * 1000);
   } catch {
     // Online play remains available if installation is blocked.
   }
