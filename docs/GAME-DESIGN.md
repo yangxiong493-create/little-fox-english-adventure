@@ -333,10 +333,19 @@ Retained：隔天或更久后仍能做到
 - 一次答对不等于学会
 - 不匹配不会降低地图进度，只会进入 Review Queue
 - 同一个不确定项不连续机械重复，稍后换一种玩法出现
-- 优先在 1 天、3 天、7 天后的故事中自然返回
-- 阶段升级只要求核心项目大部分 Retained，不追求全部 100%
+- 优先在约 1 天、3 天、7 天、14 天后的故事中自然返回
+- 阶段升级由 Stage Readiness 决定，不追求全部 100%；完整课程以核心项目大部分 Retained 为目标，当前三阶段版本采用下方的渐进门槛
 
 儿童看到的是世界逐渐恢复，家长看到的才是具体掌握状态。
+
+### 当前版本的证据闭环
+
+- 每个有声音的判断型 Play Beat 保存 Mission、场景玩法、选择数量、尝试次数、提示等级、是否 Assisted Success 和发生时间；静音游玩只推进 Story Progress，不生成听辨 Mastery Evidence。
+- 没有揭示性提示、没有不匹配且没有 Assisted Success 的表现才是 Independent Evidence；单次 Independent Evidence 仍只算一次学习脚印。
+- 两个不同 Play Beat 中的 Independent Evidence 推进到 Recognized；之后必须在未用于建立 Recognized 的新 Mission 或玩法情境中独立表现，才推进到 Applied；Applied 后至少隔一天再次独立做到才推进到 Retained。
+- 弱证据至少隔一个其他 Mission 或 30 分钟后进入 Review Queue，避免原地机械重做；正常复习按状态安排在约 1、3、7 天后返回。
+- Story Progress 与掌握状态分开保存。World Change 不会因一次不确定而丢失，但进入新的 Adventure World 会检查 Stage Readiness。
+- 当前 Stage Readiness：宝物花园要求 `hello`、`bye` 都达到 Met；行动森林要求六个名词中至少五个达到 Recognized。已经由旧版本进入的世界保持开放，但不会把旧完成记录伪造成 Independent Evidence。
 
 ## 11. 当前版本 27 个任务
 

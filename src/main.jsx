@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
 import { ITEMS, MISSIONS, STAGES, VOICE_LINES, getMission, getVoiceText } from './gameData.js';
+import {
+  LEARNING_STATUS,
+  getLearningState,
+  getReviewQueue,
+  getReviewSuggestion,
+  getStageReadiness,
+  normalizeProgress,
+  recordExposure,
+  recordMasteryEvidence,
+} from './learningProgress.js';
 import './styles.css';
 
 const LESSON_STEPS = [
@@ -11,56 +20,88 @@ const LESSON_STEPS = [
   { id: 'reward', label: '世界变了', icon: '🌟' },
 ];
 
-const PROGRESS_STORAGE_KEY = 'little-fox-progress-v2';
+const PROGRESS_STORAGE_KEY = 'little-fox-progress-v3';
+const LEGACY_PROGRESS_STORAGE_KEY = 'little-fox-progress-v2';
 
-function readSavedProgress() {
+function parseStoredProgress(raw) {
+  if (!raw) return null;
   try {
-    const saved = JSON.parse(window.localStorage.getItem(PROGRESS_STORAGE_KEY) || '{}');
-    const completedIds = Array.isArray(saved.completedIds)
-      ? [...new Set(saved.completedIds.filter((id) => Number.isInteger(id) && id >= 1 && id <= MISSIONS.length))]
-      : [];
-    return {
-      completedIds,
-      lastMissionId: Number.isInteger(saved.lastMissionId) ? saved.lastMissionId : null,
-      audioOn: saved.audioOn !== false,
-    };
+    return JSON.parse(raw);
   } catch {
-    return { completedIds: [], lastMissionId: null, audioOn: true };
+    return null;
   }
 }
 
-function fallbackSpeak(text) {
-  if (!text || !('speechSynthesis' in window)) return;
+function readSavedProgress() {
+  try {
+    const current = parseStoredProgress(window.localStorage.getItem(PROGRESS_STORAGE_KEY));
+    if (current) return normalizeProgress(current);
+    const legacy = parseStoredProgress(window.localStorage.getItem(LEGACY_PROGRESS_STORAGE_KEY));
+    return normalizeProgress(legacy || {}, { legacy: Boolean(legacy) });
+  } catch {
+    return normalizeProgress();
+  }
+}
+
+function fallbackSpeak(text, onEnded) {
+  if (!text || !('speechSynthesis' in window)) return false;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'en-US';
   utterance.rate = 0.82;
   utterance.pitch = 1.08;
+  utterance.onend = () => onEnded?.();
+  utterance.onerror = () => onEnded?.();
   window.speechSynthesis.speak(utterance);
+  return true;
 }
 
 function useGameAudio(audioOn) {
   const audioRef = useRef(null);
+  const playTokenRef = useRef(0);
+  const audioOnRef = useRef(audioOn);
+  audioOnRef.current = audioOn;
 
   const stop = useCallback(() => {
+    playTokenRef.current += 1;
     if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
     window.speechSynthesis?.cancel();
   }, []);
 
-  const play = useCallback((key) => {
-    if (!audioOn || !key) return;
+  const play = useCallback((key, { onEnded } = {}) => {
+    if (!audioOnRef.current || !key) {
+      onEnded?.();
+      return false;
+    }
     const text = getVoiceText(key);
     stop();
+    const token = playTokenRef.current;
     const player = audioRef.current || new Audio();
     audioRef.current = player;
     player.preload = 'auto';
     player.src = `${import.meta.env.BASE_URL}audio/voice/${key}.mp3`;
+    let fallbackStarted = false;
+    const finish = () => {
+      if (token === playTokenRef.current) onEnded?.();
+    };
+    const fallback = () => {
+      if (fallbackStarted || token !== playTokenRef.current || !audioOnRef.current) return;
+      fallbackStarted = true;
+      if (!fallbackSpeak(text, finish)) finish();
+    };
+    player.onended = finish;
+    player.onerror = fallback;
     const promise = player.play();
-    if (promise?.catch) promise.catch(() => fallbackSpeak(text));
-  }, [audioOn, stop]);
+    if (promise?.catch) promise.catch((error) => {
+      if (error?.name !== 'AbortError') fallback();
+    });
+    return true;
+  }, [stop]);
 
   useEffect(() => {
     if (!audioOn) stop();
@@ -70,7 +111,7 @@ function useGameAudio(audioOn) {
   return { play, stop };
 }
 
-function App() {
+export default function App() {
   const initialProgress = useMemo(readSavedProgress, []);
   const [progress, setProgress] = useState(initialProgress);
   const [screen, setScreen] = useState('welcome');
@@ -79,10 +120,16 @@ function App() {
   const [parentGateOpen, setParentGateOpen] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [clock, setClock] = useState(() => Date.now());
   const { play, stop } = useGameAudio(progress.audioOn);
 
   const completedSet = useMemo(() => new Set(progress.completedIds), [progress.completedIds]);
-  const nextMission = MISSIONS.find((mission) => !completedSet.has(mission.id)) || MISSIONS.at(-1);
+  const nextIncomplete = MISSIONS.find((mission) => !completedSet.has(mission.id)) || null;
+  const nextMission = nextIncomplete || MISSIONS.at(-1);
+  const reviewSuggestion = useMemo(
+    () => getReviewSuggestion(progress, nextIncomplete, clock),
+    [progress, nextIncomplete, clock],
+  );
   const activeMission = missionId ? getMission(missionId) : null;
 
   useEffect(() => {
@@ -116,6 +163,11 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const toggleAudio = () => setProgress((value) => ({ ...value, audioOn: !value.audioOn }));
 
   const openMap = () => {
@@ -126,15 +178,29 @@ function App() {
   const startMission = (id) => {
     const mission = getMission(id);
     const firstIncomplete = MISSIONS.find((item) => !completedSet.has(item.id));
-    const unlocked = completedSet.has(id) || !firstIncomplete || id === firstIncomplete.id;
+    const stageReady = mission ? getStageReadiness(progress, mission.stage).unlocked : false;
+    const unlocked = completedSet.has(id) || (!firstIncomplete ? false : id === firstIncomplete.id && stageReady);
     if (!mission || !unlocked) {
-      setToast('🔒 先帮小狐完成前面的任务吧');
+      setToast(stageReady ? '🔒 先帮小狐完成前面的任务吧' : '🌱 先和小狐复习一个熟悉的声音吧');
       return;
     }
+    if (!progress.audioOn) setToast('🔇 声音关闭：保留故事进度，但不记录听辨学习脚印');
+    setProgress((value) => ({
+      ...value,
+      legacyUnlockedStage: Math.max(value.legacyUnlockedStage, mission.stage),
+    }));
     setMissionId(id);
     setScreen('lesson');
     play(mission.introAudio);
   };
+
+  const recordExposureEvent = useCallback((evidence) => {
+    setProgress((value) => (value.audioOn ? recordExposure(value, evidence) : value));
+  }, []);
+
+  const recordMasteryEvidenceEvent = useCallback((evidence) => {
+    setProgress((value) => (value.audioOn ? recordMasteryEvidence(value, evidence) : value));
+  }, []);
 
   const completeMission = (id) => {
     setProgress((value) => {
@@ -159,6 +225,7 @@ function App() {
       {screen === 'welcome' && (
         <WelcomeScreen
           nextMission={nextMission}
+          reviewSuggestion={reviewSuggestion}
           completedCount={progress.completedIds.length}
           onStart={openMap}
           onParent={() => setParentGateOpen(true)}
@@ -169,12 +236,13 @@ function App() {
 
       {screen === 'map' && (
         <MapScreen
-          completedIds={progress.completedIds}
+          progress={progress}
           nextMission={nextMission}
+          nextIncomplete={nextIncomplete}
+          reviewSuggestion={reviewSuggestion}
           onMission={startMission}
           onCollection={() => setCollectionOpen(true)}
           onParent={() => setParentGateOpen(true)}
-          audioOn={progress.audioOn}
           onAudio={toggleAudio}
           onToast={setToast}
         />
@@ -187,6 +255,8 @@ function App() {
           play={play}
           onClose={goMap}
           onComplete={completeMission}
+          onExposure={recordExposureEvent}
+          onEvidence={recordMasteryEvidenceEvent}
           alreadyCompleted={completedSet.has(activeMission.id)}
         />
       )}
@@ -205,9 +275,8 @@ function App() {
       )}
       {parentOpen && (
         <ParentPanel
-          completedIds={progress.completedIds}
-          lastMissionId={progress.lastMissionId}
-          audioOn={progress.audioOn}
+          progress={progress}
+          now={clock}
           setAudioOn={(audioOn) => setProgress((value) => ({ ...value, audioOn }))}
           onClose={() => setParentOpen(false)}
         />
@@ -238,8 +307,13 @@ function IconButton({ children, label, onClick, className = '' }) {
   );
 }
 
-function WelcomeScreen({ nextMission, completedCount, onStart, onParent, audioOn, onAudio }) {
+function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, onStart, onParent, audioOn, onAudio }) {
   const allDone = completedCount === MISSIONS.length;
+  const startNote = reviewSuggestion
+    ? `小狐想再听一次 ${ITEMS[reviewSuggestion.itemId].display}`
+    : allDone
+      ? '再去看看花园朋友'
+      : `${nextMission.title}在等你`;
   return (
     <section className="welcome-screen page-pad">
       <header className="welcome-topbar">
@@ -259,7 +333,7 @@ function WelcomeScreen({ nextMission, completedCount, onStart, onParent, audioOn
             <span className="cta-icon">▶</span>
             <span>
               <b>{completedCount ? '继续冒险' : '第一次出发'}</b>
-              <small>{allDone ? '再去看看花园朋友' : `${nextMission.title}在等你`}</small>
+              <small>{startNote}</small>
             </span>
             <span className="cta-arrow">›</span>
           </button>
@@ -268,8 +342,8 @@ function WelcomeScreen({ nextMission, completedCount, onStart, onParent, audioOn
 
         <div className="welcome-art" aria-label="小狐在英语岛上挥手">
           <div className="rainbow">🌈</div>
-          <div className="floating-word word-hello">Hello!</div>
-          <div className="floating-word word-play">Let’s play!</div>
+          <div className="floating-word word-hello" lang="en">Hello!</div>
+          <div className="floating-word word-play" lang="en">Let’s play!</div>
           <div className="hero-fox"><span>🦊</span><i>👋</i></div>
           <div className="hero-island"><span>🌳</span><span>🏡</span><span>🌼 🌷 🌼</span></div>
         </div>
@@ -278,9 +352,13 @@ function WelcomeScreen({ nextMission, completedCount, onStart, onParent, audioOn
   );
 }
 
-function MapScreen({ completedIds, nextMission, onMission, onCollection, onParent, audioOn, onAudio, onToast }) {
+function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, onMission, onCollection, onParent, onAudio, onToast }) {
+  const { completedIds, audioOn } = progress;
   const completedSet = useMemo(() => new Set(completedIds), [completedIds]);
-  const suggestedStage = nextMission?.stage ?? 1;
+  const nextStageUnlocked = getStageReadiness(progress, nextMission?.stage ?? 0).unlocked;
+  const suggestedStage = nextStageUnlocked
+    ? nextMission?.stage ?? 0
+    : reviewSuggestion?.mission.stage ?? Math.max(0, (nextMission?.stage ?? 1) - 1);
   const [stageId, setStageId] = useState(suggestedStage);
   const stage = STAGES.find((item) => item.id === stageId) || STAGES[0];
   const stageMissions = MISSIONS.filter((mission) => mission.stage === stageId);
@@ -289,14 +367,24 @@ function MapScreen({ completedIds, nextMission, onMission, onCollection, onParen
 
   const missionStatus = (mission) => {
     if (completedSet.has(mission.id)) return 'done';
-    if (mission.id === nextMission.id) return 'active';
+    if (mission.id === nextIncomplete?.id && getStageReadiness(progress, mission.stage).unlocked) return 'active';
     return 'locked';
   };
+
+  const cardMission = reviewSuggestion?.mission || nextMission;
+  const reviewItem = reviewSuggestion ? ITEMS[reviewSuggestion.itemId] : null;
+  const cardKicker = reviewSuggestion
+    ? reviewSuggestion.reason === 'stage-readiness'
+      ? '再确认一个熟悉的声音，新世界就准备好了'
+      : '到了自然复习的时间'
+    : completedIds.length === MISSIONS.length
+      ? '庆典已经点亮，随时可以重玩'
+      : '下一件可以帮忙的事';
 
   return (
     <section className="map-screen page-pad">
       <header className="map-topbar">
-        <div className="profile-chip"><span>🦊</span><div><b>小小探险家</b><small>HELLO ISLAND</small></div></div>
+        <div className="profile-chip"><span>🦊</span><div><b>小小探险家</b><small lang="en">HELLO ISLAND</small></div></div>
         <div className="world-progress" aria-label={`总进度 ${completedIds.length} / ${MISSIONS.length}`}>
           <span>冒险花园</span>
           <div className="progress-track"><i style={{ width: `${(completedIds.length / MISSIONS.length) * 100}%` }} /></div>
@@ -312,18 +400,18 @@ function MapScreen({ completedIds, nextMission, onMission, onCollection, onParen
 
       <div className="stage-tabs" role="tablist" aria-label="选择冒险世界">
         {STAGES.map((item) => {
-          const firstMission = MISSIONS.find((mission) => mission.stage === item.id);
-          const unlocked = item.id === 0 || completedIds.includes(firstMission.id) || nextMission.stage === item.id;
+          const unlocked = getStageReadiness(progress, item.id).unlocked;
           return (
             <button
               key={item.id}
               className={`${stageId === item.id ? 'is-current' : ''} ${unlocked ? '' : 'is-locked'}`}
-              onClick={() => unlocked ? setStageId(item.id) : onToast('🔒 先完成小狐之家的任务吧')}
+              onClick={() => unlocked ? setStageId(item.id) : onToast('🌱 小狐想先复习几个熟悉的声音')}
               role="tab"
               aria-selected={stageId === item.id}
+              aria-disabled={!unlocked}
               type="button"
             >
-              <span>{item.icon}</span><b>{item.title}</b><small>{item.english}</small>
+              <span>{item.icon}</span><b>{item.title}</b><small lang="en">{item.english}</small>
             </button>
           );
         })}
@@ -352,12 +440,13 @@ function MapScreen({ completedIds, nextMission, onMission, onCollection, onParen
                 onClick={() => onMission(mission.id)}
                 type="button"
                 data-testid={`mission-${mission.id}`}
+                aria-disabled={status === 'locked'}
                 aria-label={`${mission.title}，${status === 'locked' ? '未解锁' : status === 'done' ? '已完成，可重玩' : '当前任务'}`}
               >
                 {status === 'active' && <span className="mission-here">从这里开始</span>}
                 <span className="mission-number">{mission.id}</span>
                 <span className="mission-icon">{status === 'locked' ? '🔒' : mission.icon}</span>
-                <span className="mission-copy"><b>{mission.title}</b><small>{mission.english}</small></span>
+                <span className="mission-copy"><b>{mission.title}</b><small lang="en">{mission.english}</small></span>
                 {status === 'done' && <i className="mission-check">✓</i>}
               </button>
             );
@@ -365,25 +454,27 @@ function MapScreen({ completedIds, nextMission, onMission, onCollection, onParen
         </div>
       </section>
 
-      <div className="next-mission-card">
+      <div className={`next-mission-card ${reviewSuggestion ? 'is-review' : ''}`}>
         <div className="guide-face">🦊</div>
-        <div className="next-copy"><small>{completedIds.length === MISSIONS.length ? '庆典已经点亮，随时可以重玩' : '下一件可以帮忙的事'}</small><b>{nextMission.title}</b><span>{nextMission.english}</span></div>
-        <div className="mini-goals"><span>👂 听</span><span>🖐️ 玩</span><span>🌟 改变世界</span></div>
-        <button className="go-button" onClick={() => onMission(nextMission.id)} type="button">出发 <span>→</span></button>
+        <div className="next-copy"><small>{cardKicker}</small><b>{reviewItem ? `再听听 ${reviewItem.display}` : cardMission.title}</b><span>{reviewItem ? `回到「${cardMission.title}」换个场景试试` : cardMission.english}</span></div>
+        <div className="mini-goals">{reviewSuggestion ? <><span>👂 再听</span><span>🖐️ 换场景</span><span>🌱 留下学习脚印</span></> : <><span>👂 听</span><span>🖐️ 玩</span><span>🌟 改变世界</span></>}</div>
+        <button className="go-button" onClick={() => onMission(cardMission.id)} type="button" data-testid={reviewSuggestion ? 'review-start' : 'next-start'}>{reviewSuggestion ? '复习' : '出发'} <span>→</span></button>
       </div>
     </section>
   );
 }
 
-function LessonScreen({ mission, play, onClose, onComplete, alreadyCompleted }) {
+function LessonScreen({ mission, play, onClose, onComplete, onExposure, onEvidence, alreadyCompleted }) {
   const [stepIndex, setStepIndex] = useState(0);
   const completionRecorded = useRef(false);
+  const replayAtStart = useRef(alreadyCompleted).current;
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [stepIndex]);
 
   const goToMeet = () => {
+    onExposure({ itemId: mission.meet[0], missionId: mission.id });
     play(ITEMS[mission.meet[0]].audio);
     setStepIndex(1);
   };
@@ -408,7 +499,7 @@ function LessonScreen({ mission, play, onClose, onComplete, alreadyCompleted }) 
     <section className={`lesson-screen lesson-stage-${mission.stage}`}>
       <header className="lesson-topbar page-pad">
         <button className="back-button" onClick={onClose} type="button" aria-label="退出关卡">‹</button>
-        <div className="lesson-title"><span>{mission.icon}</span><div><b>{mission.title}</b><small>{mission.english}</small></div></div>
+        <div className="lesson-title"><span>{mission.icon}</span><div><b>{mission.title}</b><small lang="en">{mission.english}</small></div></div>
         <div className="lesson-progress">
           {LESSON_STEPS.map((step, index) => (
             <div key={step.id} className={`${index < stepIndex ? 'is-done' : ''} ${index === stepIndex ? 'is-current' : ''}`}>
@@ -422,10 +513,10 @@ function LessonScreen({ mission, play, onClose, onComplete, alreadyCompleted }) 
 
       <div className="lesson-stage page-pad" key={stepIndex}>
         {stepIndex === 0 && <StoryStep mission={mission} play={play} onNext={goToMeet} />}
-        {stepIndex === 1 && <MeetStep mission={mission} play={play} onNext={goToChallenge} />}
-        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} onNext={goToEcho} />}
+        {stepIndex === 1 && <MeetStep mission={mission} play={play} onExposure={onExposure} onNext={goToChallenge} />}
+        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} onEvidence={onEvidence} onNext={goToEcho} />}
         {stepIndex === 3 && <EchoStep mission={mission} play={play} onNext={goToReward} />}
-        {stepIndex === 4 && <RewardStep mission={mission} onMap={onClose} replay={alreadyCompleted} />}
+        {stepIndex === 4 && <RewardStep mission={mission} onMap={onClose} replay={replayAtStart} />}
       </div>
     </section>
   );
@@ -445,7 +536,7 @@ function StoryStep({ mission, play, onNext }) {
         <h2>{mission.storyGoal}</h2>
         <div className="guide-card">
           <span className="guide-character">🦊</span>
-          <div><p>{VOICE_LINES[mission.introAudio].text}</p><button className="listen-button" onClick={() => play(mission.introAudio)} type="button" aria-label="再听一次">🔊</button></div>
+          <div><p lang="en">{VOICE_LINES[mission.introAudio].text}</p><button className="listen-button" onClick={() => play(mission.introAudio)} type="button" aria-label="再听一次">🔊</button></div>
         </div>
         <button className="primary-cta compact" onClick={onNext} type="button" data-testid="story-next">
           <span className="cta-icon">🖐️</span><span><b>我来帮忙！</b><small>Let’s go!</small></span><span className="cta-arrow">›</span>
@@ -455,29 +546,44 @@ function StoryStep({ mission, play, onNext }) {
   );
 }
 
-function MeetStep({ mission, play, onNext }) {
-  const [touches, setTouches] = useState(0);
+function MeetStep({ mission, play, onExposure, onNext }) {
+  const [touchesByItem, setTouchesByItem] = useState(() => Object.fromEntries(mission.meet.map((itemId) => [itemId, 0])));
   const [lastTouched, setLastTouched] = useState('');
-  const [showHand, setShowHand] = useState(false);
-  const requiredTouches = mission.meetRepeats;
-  const ready = touches >= requiredTouches;
+  const [handTarget, setHandTarget] = useState('');
+  const touchTimerRef = useRef(null);
+  const requiredPerItem = mission.meetRepeats;
+  const totalRequired = mission.meet.length * requiredPerItem;
+  const totalTouches = mission.meet.reduce((sum, itemId) => sum + Math.min(touchesByItem[itemId] || 0, requiredPerItem), 0);
+  const nextItemId = mission.meet.find((itemId) => (touchesByItem[itemId] || 0) < requiredPerItem) || '';
+  const ready = totalTouches >= totalRequired;
 
   useEffect(() => {
-    const handTimer = window.setTimeout(() => setShowHand(true), 3200);
-    const replayTimer = window.setTimeout(() => play(ITEMS[mission.meet[0]].audio), 3600);
+    if (ready || !nextItemId) return undefined;
+    const handTimer = window.setTimeout(() => setHandTarget(nextItemId), 3200);
+    const replayTimer = window.setTimeout(() => {
+      onExposure({ itemId: nextItemId, missionId: mission.id });
+      play(ITEMS[nextItemId].audio);
+    }, 3600);
     return () => {
       window.clearTimeout(handTimer);
       window.clearTimeout(replayTimer);
     };
-  }, [mission, play]);
+  }, [mission.id, nextItemId, onExposure, play, ready, totalTouches]);
+
+  useEffect(() => () => window.clearTimeout(touchTimerRef.current), []);
 
   const touchItem = (itemId) => {
     const item = ITEMS[itemId];
     setLastTouched(itemId);
-    setShowHand(false);
-    setTouches((value) => Math.min(value + 1, requiredTouches));
+    setHandTarget('');
+    setTouchesByItem((value) => ({
+      ...value,
+      [itemId]: Math.min((value[itemId] || 0) + 1, requiredPerItem),
+    }));
+    onExposure({ itemId, missionId: mission.id });
     play(item.audio);
-    window.setTimeout(() => setLastTouched(''), 600);
+    window.clearTimeout(touchTimerRef.current);
+    touchTimerRef.current = window.setTimeout(() => setLastTouched(''), 600);
   };
 
   return (
@@ -485,8 +591,8 @@ function MeetStep({ mission, play, onNext }) {
       <header className="activity-title">
         <span className="step-kicker">点一点，听一听</span>
         <h2>小狐先带你认识它</h2>
-        <div className="exposure-dots" aria-label={`已听 ${Math.min(touches, requiredTouches)} 次`}>
-          {Array.from({ length: requiredTouches }, (_, index) => <i key={index} className={index < touches ? 'is-on' : ''}>✦</i>)}
+        <div className="exposure-dots" aria-label={`已听 ${totalTouches} 次，共需要 ${totalRequired} 次`}>
+          {Array.from({ length: totalRequired }, (_, index) => <i key={index} className={index < totalTouches ? 'is-on' : ''}>✦</i>)}
         </div>
       </header>
       <div className={`meet-items meet-count-${Math.min(mission.meet.length, 6)}`}>
@@ -495,13 +601,13 @@ function MeetStep({ mission, play, onNext }) {
           return (
             <button
               key={itemId}
-              className={`meet-item tone-${item.tone} ${lastTouched === itemId ? 'is-touched' : ''}`}
+              className={`meet-item tone-${item.tone} ${lastTouched === itemId ? 'is-touched' : ''} ${(touchesByItem[itemId] || 0) >= requiredPerItem ? 'is-heard' : ''}`}
               onClick={() => touchItem(itemId)}
               type="button"
               data-testid={`meet-${itemId}`}
             >
-              {showHand && index === 0 && <span className="demo-hand">☝️</span>}
-              <span>{item.emoji}</span><b>{item.display}</b><small>🔊</small>
+              {handTarget === itemId && <span className="demo-hand">☝️</span>}
+              <span>{item.emoji}</span><b lang="en">{item.display}</b><small>🔊</small>
             </button>
           );
         })}
@@ -518,13 +624,16 @@ function MeetStep({ mission, play, onNext }) {
   );
 }
 
-function ChallengeStep({ mission, play, onNext }) {
+function ChallengeStep({ mission, play, onEvidence, onNext }) {
   const [roundIndex, setRoundIndex] = useState(0);
   const roundData = mission.rounds[roundIndex];
+  const transitionTimerRef = useRef(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [roundIndex]);
+
+  useEffect(() => () => window.clearTimeout(transitionTimerRef.current), []);
 
   const solved = () => {
     if (roundIndex === mission.rounds.length - 1) {
@@ -532,7 +641,7 @@ function ChallengeStep({ mission, play, onNext }) {
       return;
     }
     const nextIndex = roundIndex + 1;
-    window.setTimeout(() => {
+    transitionTimerRef.current = window.setTimeout(() => {
       setRoundIndex(nextIndex);
       play(mission.rounds[nextIndex].audio);
     }, 750);
@@ -543,17 +652,20 @@ function ChallengeStep({ mission, play, onNext }) {
       <div className="round-dots" aria-label={`第 ${roundIndex + 1} 小步，共 ${mission.rounds.length} 小步`}>
         {mission.rounds.map((_, index) => <i key={index} className={index < roundIndex ? 'is-done' : index === roundIndex ? 'is-current' : ''} />)}
       </div>
-      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} play={play} onSolved={solved} />
+      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} roundIndex={roundIndex} play={play} onEvidence={onEvidence} onSolved={solved} />
     </div>
   );
 }
 
-function ChallengeRound({ mission, round, play, onSolved }) {
+function ChallengeRound({ mission, round, roundIndex, play, onEvidence, onSolved }) {
   const [tries, setTries] = useState(0);
   const [hintLevel, setHintLevel] = useState(0);
   const [wrongChoice, setWrongChoice] = useState('');
   const [status, setStatus] = useState('ready');
+  const [selectedResult, setSelectedResult] = useState(null);
   const timerRef = useRef(null);
+  const wrongTimerRef = useRef(null);
+  const evidenceRecordedRef = useRef(false);
 
   useEffect(() => {
     if (status !== 'ready') return undefined;
@@ -567,9 +679,25 @@ function ChallengeRound({ mission, round, play, onSolved }) {
     };
   }, [play, round.audio, status]);
 
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(timerRef.current);
+    window.clearTimeout(wrongTimerRef.current);
+  }, []);
 
-  const finish = (assisted = false) => {
+  const finish = (assisted = false, result = { attempts: tries, hintLevel }) => {
+    if (!evidenceRecordedRef.current) {
+      evidenceRecordedRef.current = true;
+      onEvidence({
+        itemIds: round.learningItems || [round.target],
+        missionId: mission.id,
+        roundIndex,
+        mode: round.mode,
+        choicesCount: round.choices.length,
+        attempts: result.attempts,
+        hintLevel: result.hintLevel,
+        assisted,
+      });
+    }
     setStatus(assisted ? 'assisted' : 'success');
     setHintLevel(3);
     const actionSuccessAudio = {
@@ -584,13 +712,19 @@ function ChallengeRound({ mission, round, play, onSolved }) {
   const choose = (itemId) => {
     if (status !== 'ready') return;
     if (itemId === round.target) {
-      finish(false);
+      if (round.mode === 'forest-give' || round.mode === 'forest-put') {
+        setSelectedResult({ attempts: tries, hintLevel });
+        setStatus('placing');
+        return;
+      }
+      finish(false, { attempts: tries, hintLevel });
       return;
     }
     const nextTries = tries + 1;
     setTries(nextTries);
     setWrongChoice(itemId);
-    window.setTimeout(() => setWrongChoice(''), 520);
+    window.clearTimeout(wrongTimerRef.current);
+    wrongTimerRef.current = window.setTimeout(() => setWrongChoice(''), 520);
     if (nextTries === 1) {
       setHintLevel(1);
       play('guide_again');
@@ -601,15 +735,20 @@ function ChallengeRound({ mission, round, play, onSolved }) {
       setStatus('helping');
       setHintLevel(3);
       play('guide_together');
-      timerRef.current = window.setTimeout(() => finish(true), 1050);
+      timerRef.current = window.setTimeout(() => finish(true, { attempts: nextTries, hintLevel: 3 }), 1050);
     }
+  };
+
+  const finishPlacement = () => {
+    if (status !== 'placing' || !selectedResult) return;
+    finish(false, selectedResult);
   };
 
   return (
     <div className={`challenge-round mode-${round.mode} target-${round.target} hint-${hintLevel} status-${status}`}>
       <header className="activity-title">
         <span className="step-kicker">仔细听，小狐在说什么？</span>
-        <h2>{round.prompt}</h2>
+        <h2 lang="en">{round.prompt}</h2>
         <button className="big-audio-button" onClick={() => play(round.audio)} type="button"><span>🔊</span><b>再听一次</b></button>
       </header>
 
@@ -620,8 +759,8 @@ function ChallengeRound({ mission, round, play, onSolved }) {
         {round.mode === 'drive' && <div className="scene-destination">〰️〰️🏁</div>}
         {round.mode === 'pour' && <div className="scene-destination">🐰　🥤</div>}
         {round.mode === 'forest-find' && <div className="scene-destination forest-destination">🌲　🍂　🔍</div>}
-        {round.mode === 'forest-give' && <div className="scene-destination forest-destination">🐿️　👐　🎒</div>}
-        {round.mode === 'forest-put' && <div className="scene-destination forest-destination">🌳　📥　✨</div>}
+        {round.mode === 'forest-give' && <button className={`scene-destination forest-destination action-destination ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label="把宝物递给松鼠" disabled={status !== 'placing'}>🐿️　👐　🎒{status === 'placing' && <i>☝️</i>}</button>}
+        {round.mode === 'forest-put' && <button className={`scene-destination forest-destination action-destination ${status === 'placing' ? 'is-ready' : ''}`} onClick={finishPlacement} type="button" aria-label="把宝物放进树洞" disabled={status !== 'placing'}>🌳　📥　✨{status === 'placing' && <i>☝️</i>}</button>}
         {round.mode === 'forest-action' && <div className="scene-destination forest-action-preview"><span>🦊</span><i>🍄　·　·　🛑</i></div>}
         {round.mode === 'forest-color' && <div className="scene-destination forest-destination">🌿　✨　🌿</div>}
         <div className={`choice-row choice-count-${round.choices.length}`} role="group" aria-label="听声音选择">
@@ -631,7 +770,7 @@ function ChallengeRound({ mission, round, play, onSolved }) {
             return (
               <button
                 key={itemId}
-                className={`choice-card tone-${item.tone} ${wrongChoice === itemId ? 'is-wrong' : ''} ${isTarget && hintLevel >= 1 ? 'is-hint' : ''} ${isTarget && status !== 'ready' && status !== 'helping' ? 'is-correct' : ''}`}
+                className={`choice-card tone-${item.tone} ${wrongChoice === itemId ? 'is-wrong' : ''} ${isTarget && hintLevel >= 1 ? 'is-hint' : ''} ${isTarget && status === 'placing' ? 'is-selected' : ''} ${isTarget && (status === 'success' || status === 'assisted') ? 'is-correct' : ''}`}
                 onClick={() => choose(itemId)}
                 type="button"
                 data-testid={`choice-${itemId}`}
@@ -639,16 +778,16 @@ function ChallengeRound({ mission, round, play, onSolved }) {
                 {round.mode === 'reveal' && <span className="cover-emoji">🌿</span>}
                 {round.mode === 'hide' && <span className="cover-emoji">🎁</span>}
                 <span className="choice-emoji">{item.emoji}</span>
-                <b>{item.label}</b>
+                <b lang="en">{item.label}</b>
                 {isTarget && hintLevel >= 2 && <i className="hint-hand">☝️</i>}
-                {isTarget && status !== 'ready' && status !== 'helping' && <i className="correct-star">★</i>}
+                {isTarget && (status === 'success' || status === 'assisted') && <i className="correct-star">★</i>}
               </button>
             );
           })}
         </div>
         {status === 'helping' && <div className="assisted-path">🦊 · · · ☝️ 一起完成</div>}
       </div>
-      <div className="kind-hint">💛 点错没关系，小狐会一步一步来帮忙</div>
+      <div className="kind-hint">{status === 'placing' ? '✨ 再点一下上面的朋友或树洞，完成动作' : '💛 点错没关系，小狐会一步一步来帮忙'}</div>
     </div>
   );
 }
@@ -656,18 +795,23 @@ function ChallengeRound({ mission, round, play, onSolved }) {
 function EchoStep({ mission, play, onNext }) {
   const item = ITEMS[mission.echo];
   const [heard, setHeard] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const finishTimerRef = useRef(null);
+
+  useEffect(() => () => window.clearTimeout(finishTimerRef.current), []);
 
   const listen = () => {
     setHeard(true);
-    play(item.audio);
+    const started = play(item.audio, { onEnded: () => setIsPlaying(false) });
+    setIsPlaying(started);
   };
   const finish = (saidIt) => {
     if (finishing) return;
     setFinishing(true);
     if (saidIt) {
       play(item.successAudio);
-      window.setTimeout(onNext, 850);
+      finishTimerRef.current = window.setTimeout(onNext, 850);
     } else {
       onNext();
     }
@@ -677,12 +821,12 @@ function EchoStep({ mission, play, onNext }) {
     <div className="echo-step">
       <div className="echo-visual">
         <span className="echo-fox">🦊</span>
-        <div className={`sound-waves ${heard ? 'is-playing' : ''}`}><i /><i /><i /><i /><i /><i /><i /></div>
-        <div className={`echo-word-card tone-${item.tone}`}><span>{item.emoji}</span><b>{item.display}</b></div>
+        <div className={`sound-waves ${isPlaying ? 'is-playing' : ''}`}><i /><i /><i /><i /><i /><i /><i /></div>
+        <div className={`echo-word-card tone-${item.tone}`}><span>{item.emoji}</span><b lang="en">{item.display}</b></div>
       </div>
       <div className="echo-panel">
         <span className="step-kicker">想说就说，不说也能继续</span>
-        <h2>{item.display}</h2>
+        <h2 lang="en">{item.display}</h2>
         <p>先听小狐说一遍，你愿意的话也可以跟着说。</p>
         <button className="record-button" onClick={listen} type="button"><span>🔊</span><b>先听一遍</b><small>Tap to listen</small></button>
         <div className={`echo-actions ${heard ? 'is-ready' : ''}`}>
@@ -709,11 +853,45 @@ function RewardStep({ mission, onMap, replay }) {
   );
 }
 
-function Modal({ children, onClose, className = '' }) {
+function Modal({ children, onClose, className = '', label = '弹窗' }) {
+  const cardRef = useRef(null);
+  const closeRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    closeRef.current?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !cardRef.current) return;
+      const focusable = [...cardRef.current.querySelectorAll('button:not(:disabled), [href], input, [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, []);
+
   return (
     <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className={`modal-card ${className}`} role="dialog" aria-modal="true">
-        <button className="modal-close" onClick={onClose} type="button" aria-label="关闭">×</button>
+      <section ref={cardRef} className={`modal-card ${className}`} role="dialog" aria-modal="true" aria-label={label}>
+        <button ref={closeRef} className="modal-close" onClick={onClose} type="button" aria-label="关闭">×</button>
         {children}
       </section>
     </div>
@@ -723,7 +901,7 @@ function Modal({ children, onClose, className = '' }) {
 function CollectionModal({ completedIds, onClose }) {
   const completedSet = new Set(completedIds);
   return (
-    <Modal onClose={onClose} className="collection-modal">
+    <Modal onClose={onClose} className="collection-modal" label="我的冒险收藏盒">
       <span className="modal-kicker">MY STORY BOX</span>
       <h2>我的冒险收藏盒</h2>
       <p>每个纪念品都来自一次真正帮到朋友的故事。</p>
@@ -752,7 +930,7 @@ function ParentGate({ onClose, onUnlock }) {
     }
   };
   return (
-    <Modal onClose={onClose} className="parent-gate-modal">
+    <Modal onClose={onClose} className="parent-gate-modal" label="家长验证">
       <span className="parent-icon">👨‍👩‍👧</span><span className="modal-kicker">FOR GROWN-UPS</span>
       <h2>请家长来回答</h2><p>这是家长专属区域</p>
       <div className={`math-question ${error ? 'is-error' : ''}`}><b>2 + 3 =</b><span>{answer || '?'}</span></div>
@@ -762,75 +940,34 @@ function ParentGate({ onClose, onUnlock }) {
   );
 }
 
-function ParentPanel({ completedIds, lastMissionId, audioOn, setAudioOn, onClose }) {
+function ParentPanel({ progress, now, setAudioOn, onClose }) {
+  const { completedIds, lastMissionId, audioOn } = progress;
   const completedCount = completedIds.length;
   const lastMission = getMission(lastMissionId) || MISSIONS[0];
-  const learningItems = [
-    { id: 'hello', title: 'Hello!', mission: 1 },
-    { id: 'bye', title: 'Bye-bye!', mission: 3 },
-    { id: 'apple', title: 'apple', mission: 4 },
-    { id: 'ball', title: 'ball', mission: 5 },
-    { id: 'cat', title: 'cat', mission: 7 },
-    { id: 'dog', title: 'dog', mission: 8 },
-    { id: 'car', title: 'car', mission: 10 },
-    { id: 'milk', title: 'milk', mission: 11 },
-    { id: 'find', title: 'Find it!', mission: 16 },
-    { id: 'give', title: 'Give it!', mission: 17 },
-    { id: 'put', title: 'Put it in!', mission: 18 },
-    { id: 'jump', title: 'Jump!', mission: 19 },
-    { id: 'stop', title: 'Stop!', mission: 20 },
-    { id: 'red', title: 'red', mission: 22 },
-    { id: 'blue', title: 'blue', mission: 23 },
-  ];
-  const knownItems = learningItems.filter((item) => completedIds.includes(item.mission));
+  const knownItems = Object.values(ITEMS)
+    .map((item) => ({ id: item.id, title: item.display, state: getLearningState(progress, item.id) }))
+    .filter((item) => item.state.status !== 'unseen');
+  const independentlyRecognized = knownItems.filter((item) => item.state.rank >= LEARNING_STATUS.recognized.rank).length;
+  const reviewQueue = getReviewQueue(progress, now);
+  const reviewIds = new Set(reviewQueue.map((item) => item.itemId));
 
   return (
-    <Modal onClose={onClose} className="parent-panel-modal">
-      <header className="parent-header"><div><span className="modal-kicker">PARENT DASHBOARD</span><h2>孩子的冒险小结</h2></div><span className="date-pill">本机记录 · 不上传</span></header>
+    <Modal onClose={onClose} className="parent-panel-modal" label="孩子的学习脚印">
+      <header className="parent-header"><div><span className="modal-kicker">PARENT DASHBOARD</span><h2>孩子的学习脚印</h2></div><span className="date-pill">本机证据 · 不上传</span></header>
       <div className="parent-stats">
         <div><span>🗺️</span><b>{completedCount}</b><small>完成故事</small></div>
-        <div><span>🎒</span><b>{completedCount}</b><small>故事纪念品</small></div>
-        <div><span>🌱</span><b>{completedCount} / {MISSIONS.length}</b><small>主线进度</small></div>
+        <div><span>👂</span><b>{independentlyRecognized}</b><small>独立辨认</small></div>
+        <div><span>🌱</span><b>{reviewQueue.length}</b><small>现在适合复习</small></div>
       </div>
       <section className="learning-report">
-        <div className="report-title"><b>已经在故事里遇见</b><span>不是考试分数</span></div>
+        <div className="report-title"><b>每个声音的掌握状态</b><span>完成故事不直接等于学会</span></div>
         {knownItems.length ? knownItems.map((item) => (
-          <div className="skill-row" key={item.id}><span className="skill-icon mastered">✓</span><div><b>{item.title}</b><small>已在可理解情境中听到并行动</small></div><i>继续自然复习</i></div>
+          <div className={`skill-row status-${item.state.status}`} key={item.id}><span className={`skill-icon status-${item.state.status}`}>{item.state.icon}</span><div><b lang="en">{item.title}</b><small>{item.state.label}</small></div><i>{reviewIds.has(item.id) ? '现在适合换场景再听' : item.state.needsSupport ? '已排入稍后复习' : '继续自然复现'}</i></div>
         )) : <div className="empty-report">完成第一关后，这里会出现孩子听懂过的声音。</div>}
       </section>
       <section className="parent-tip"><span>💡</span><div><b>今晚这样玩</b><p>{completedCount ? lastMission.familyQuest : '见到孩子时挥挥手，说一次 “Hello!”；愿意看向你就已经很好。'}</p></div></section>
-      <div className="parent-settings"><span><b>游戏声音</b><small>A 女声 · lovely_girl · MiniMax Speech 2.8 HD</small></span><button className={`toggle ${audioOn ? 'is-on' : ''}`} onClick={() => setAudioOn(!audioOn)} type="button" aria-label="切换游戏声音"><i /></button></div>
-      <p className="ai-disclosure">角色语音由 AI 合成；App 不使用麦克风，不收集儿童声音或学习数据。</p>
+      <div className="parent-settings"><span><b>游戏声音</b><small>A 女声 · lovely_girl · MiniMax Speech 2.8 HD</small></span><button className={`toggle ${audioOn ? 'is-on' : ''}`} onClick={() => setAudioOn(!audioOn)} type="button" aria-label="切换游戏声音" aria-pressed={audioOn}><i /></button></div>
+      <p className="ai-disclosure">角色语音由 AI 合成；关闭声音时仍可完成故事，但不会形成听辨证据。App 不使用麦克风，不收集儿童声音或学习数据。</p>
     </Modal>
   );
 }
-
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode><App /></React.StrictMode>,
-);
-
-async function registerPwa() {
-  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
-  try {
-    const hadController = Boolean(navigator.serviceWorker.controller);
-    const registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL });
-    if (registration.waiting) window.dispatchEvent(new Event('little-fox-update-ready'));
-    const watchWorker = (worker) => {
-      if (!worker) return;
-      worker.addEventListener('statechange', () => {
-        if (worker.state === 'installed' && hadController) window.dispatchEvent(new Event('little-fox-update-ready'));
-      });
-    };
-    watchWorker(registration.installing);
-    registration.addEventListener('updatefound', () => watchWorker(registration.installing));
-    if (!hadController) {
-      await navigator.serviceWorker.ready;
-      window.dispatchEvent(new Event('little-fox-offline-ready'));
-    }
-    window.setInterval(() => registration.update(), 60 * 60 * 1000);
-  } catch {
-    // Online play remains available if installation is blocked.
-  }
-}
-
-window.addEventListener('load', registerPwa);

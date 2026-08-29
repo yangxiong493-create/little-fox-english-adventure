@@ -46,6 +46,10 @@ _Avoid_: Instruction, explanation
 An observed action showing what the child understood or used, including the scene, hint level, and response type.
 _Avoid_: Score, grade
 
+**Independent Evidence**:
+Mastery Evidence produced without a revealing hint or Assisted Success. It may advance a Learning Item beyond Met, but a single instance never proves lasting mastery.
+_Avoid_: Correct answer, pass
+
 **Met**:
 The child has experienced a Learning Item with understandable context but has not yet independently identified it.
 
@@ -63,6 +67,10 @@ _Avoid_: Mastered forever
 The ordered set of Learning Items due to return because of time, weak evidence, or a need for transfer.
 _Avoid_: Wrong-answer list
 
+**Stage Readiness**:
+The evidence-based condition for entering a new Stage, evaluated from its core Learning Items rather than from stars or Mission count alone.
+_Avoid_: Level score, completion percentage
+
 ## Child Experience
 
 **Guidance Ladder**:
@@ -76,6 +84,10 @@ _Avoid_: Auto-answer, failure
 **World Change**:
 A lasting visible result of a Mission, such as a flower blooming, a bridge repairing, or a character joining the festival.
 _Avoid_: Points payout
+
+**Story Progress**:
+The child's record of completed Missions and visible World Changes. It is preserved even when a Learning Item returns through the Review Queue.
+_Avoid_: Mastery score
 
 **Keepsake**:
 A non-random visual memory earned from a specific story event.

@@ -8,16 +8,16 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "audio:generate": "node scripts/generate-audio.mjs",
-    "test": "node scripts/validate-content.mjs",
+    "test": "node scripts/validate-content.mjs && node scripts/validate-learning.mjs",
     "check": "npm test && vite build"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "vite": "latest"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "vite-plugin-pwa": "^1.3.0"
+    "@vitejs/plugin-react": "6.1.0",
+    "vite": "8.2.2",
+    "vite-plugin-pwa": "1.3.0"
   }
 }

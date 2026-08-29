@@ -138,7 +138,20 @@ export const ITEMS = {
   },
 };
 
-const round = (target, choices, audio, prompt, mode = 'find') => ({ target, choices, audio, prompt, mode });
+const MODE_LEARNING_ITEMS = {
+  'forest-find': 'find',
+  'forest-give': 'give',
+  'forest-put': 'put',
+};
+
+export function getRoundLearningItems(roundData) {
+  return [...new Set([MODE_LEARNING_ITEMS[roundData.mode], roundData.target].filter(Boolean))];
+}
+
+const round = (target, choices, audio, prompt, mode = 'find') => {
+  const roundData = { target, choices, audio, prompt, mode };
+  return { ...roundData, learningItems: getRoundLearningItems(roundData) };
+};
 
 export const MISSIONS = [
   {
@@ -351,7 +364,7 @@ export const MISSIONS = [
     title: '宝物躲猫猫',
     english: 'Treasure hunt',
     icon: '🎁',
-    storyGoal: '在换过位置的盒子里找到六种熟悉宝物',
+    storyGoal: '从六种熟悉宝物里，找出小狐说的三个',
     scene: ['🎁', '❔', '🎁'],
     introAudio: 'm12_story',
     meet: ['apple', 'ball', 'cat', 'dog', 'car', 'milk'],
@@ -640,7 +653,7 @@ export const MISSIONS = [
     storyGoal: '听声音把两份快递送给等待的森林朋友',
     scene: ['🐿️', '📦', '📮'],
     introAudio: 'm26_story',
-    meet: ['give', 'find'],
+    meet: ['give'],
     meetRepeats: 1,
     rounds: [
       round('milk', ['apple', 'ball', 'milk'], 'prompt_give_milk', 'Give me the milk.', 'forest-give'),
@@ -661,7 +674,7 @@ export const MISSIONS = [
     storyGoal: '连续听懂三个声音线索，帮萤火虫点亮森林舞台',
     scene: ['🌌', '✨', '🎪'],
     introAudio: 'm27_story',
-    meet: ['find', 'jump', 'stop', 'put'],
+    meet: ['find', 'jump', 'stop'],
     meetRepeats: 1,
     rounds: [
       round('car', ['dog', 'milk', 'car'], 'prompt_find_car', 'Find the car.', 'forest-find'),

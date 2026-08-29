@@ -26,6 +26,7 @@ for (const [index, mission] of MISSIONS.entries()) {
   check([0, 1, 2].includes(mission.stage), `Mission ${mission.id} has an invalid stage`);
   check(mission.introAudio in VOICE_LINES, `Mission ${mission.id} has an unknown intro audio key`);
   check(mission.meet.length > 0, `Mission ${mission.id} needs at least one Meet item`);
+  check(new Set(mission.meet).size === mission.meet.length, `Mission ${mission.id} has duplicate Meet items`);
   check(Number.isInteger(mission.meetRepeats) && mission.meetRepeats > 0, `Mission ${mission.id} has invalid Meet repetitions`);
   check(mission.rounds.length > 0, `Mission ${mission.id} needs at least one challenge round`);
   check(mission.echo in ITEMS, `Mission ${mission.id} has an unknown echo item`);
@@ -36,9 +37,15 @@ for (const [index, mission] of MISSIONS.entries()) {
   for (const challenge of mission.rounds) {
     check(challenge.target in ITEMS, `Mission ${mission.id} has unknown target ${challenge.target}`);
     check(challenge.choices.includes(challenge.target), `Mission ${mission.id} choices omit target ${challenge.target}`);
+    check(new Set(challenge.choices).size === challenge.choices.length, `Mission ${mission.id} has duplicate challenge choices`);
+    check(challenge.choices.length <= 3, `Mission ${mission.id} exceeds the three-choice curriculum limit`);
     check(challenge.audio in VOICE_LINES, `Mission ${mission.id} has unknown prompt audio ${challenge.audio}`);
+    check(Array.isArray(challenge.learningItems) && challenge.learningItems.length > 0, `Mission ${mission.id} challenge needs Learning Items`);
     for (const itemId of challenge.choices) {
       check(itemId in ITEMS, `Mission ${mission.id} references unknown choice ${itemId}`);
+    }
+    for (const itemId of challenge.learningItems) {
+      check(itemId in ITEMS, `Mission ${mission.id} records evidence for unknown item ${itemId}`);
     }
   }
 }

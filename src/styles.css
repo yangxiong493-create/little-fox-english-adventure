@@ -623,6 +623,15 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.next-mission-card.is-review {
+  border-color: rgba(255, 230, 126, 0.9);
+  background: linear-gradient(135deg, rgba(255, 253, 224, 0.96), rgba(239, 255, 235, 0.96));
+}
+
+.next-mission-card.is-review .guide-face { background: #fff2a9; }
+.next-mission-card.is-review .go-button { background: linear-gradient(135deg, #73cf82, #43a968); box-shadow: 0 6px 0 #31834e; }
+.next-mission-card.is-review .go-button:active { box-shadow: 0 2px 0 #31834e; }
+
 .guide-face { display: grid; width: 62px; height: 62px; place-items: center; border-radius: 20px; background: #fff0d1; font-size: 43px; }
 .next-copy small,
 .next-copy b,
@@ -813,6 +822,7 @@ button:disabled {
 
 .meet-item:active,
 .meet-item.is-touched { transform: translateY(8px) scale(0.97); box-shadow: 0 3px 0 rgba(64, 102, 100, 0.16); }
+.meet-item.is-heard { border-color: rgba(99, 202, 130, 0.76); }
 .meet-item > span:not(.demo-hand) { font-size: clamp(96px, 13vw, 155px); filter: drop-shadow(0 12px 7px rgba(53, 69, 68, 0.14)); }
 .meet-item b { color: var(--ink); font-size: clamp(25px, 3vw, 38px); }
 .meet-item small { position: absolute; top: 16px; right: 16px; display: grid; width: 48px; height: 48px; place-items: center; border-radius: 16px; background: white; box-shadow: var(--soft-shadow); font-size: 21px; }
@@ -865,6 +875,9 @@ button:disabled {
 
 .scene-destination { height: 62px; font-size: 48px; letter-spacing: 0.12em; }
 .forest-destination { font-size: 42px; }
+.action-destination { position: relative; width: min(430px, 100%); margin: 0 auto 8px; border: 4px solid transparent; border-radius: 22px; background: rgba(255, 255, 255, 0.22); cursor: default; }
+.action-destination.is-ready { border-color: #ffe16c; background: rgba(255, 251, 205, 0.92); box-shadow: 0 0 0 9px rgba(255, 225, 108, 0.25), var(--soft-shadow); cursor: pointer; animation: target-breathe 1.25s ease-in-out infinite; }
+.action-destination i { position: absolute; right: 12px; bottom: -22px; font-size: 39px; font-style: normal; animation: hand-tap 1s ease-in-out infinite; }
 .forest-action-preview {
   display: flex;
   align-items: center;
@@ -907,6 +920,7 @@ button:disabled {
 .choice-card b { position: relative; z-index: 2; color: #315566; font-size: 22px; }
 .choice-card.is-wrong { animation: gentle-shake 420ms ease; }
 .choice-card.is-hint { animation: target-breathe 1.25s ease-in-out infinite; }
+.choice-card.is-selected { border-color: #ffe374; background: #fffceb; box-shadow: 0 0 0 10px rgba(255, 227, 116, 0.28), 0 10px 0 rgba(65, 105, 105, 0.2); }
 .choice-card.is-correct { border-color: #fff492; background: #fffbd5; animation: success-bounce 550ms ease both; }
 .hint-2 .choice-card:not(.is-hint) { opacity: 0.36; filter: saturate(0.35); }
 .hint-hand { position: absolute; z-index: 5; right: 10px; bottom: 7px; font-size: 45px; font-style: normal; animation: hand-tap 1s ease-in-out infinite; }
@@ -1098,11 +1112,15 @@ button:disabled {
 .skill-row { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 10px; min-height: 54px; border-top: 1px solid #dfe7e2; }
 .skill-icon { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 50%; background: #dce7e2; }
 .skill-icon.mastered { color: white; background: var(--green); }
+.skill-icon.status-met { color: #52737e; background: #e3eeeb; }
+.skill-icon.status-recognized { color: white; background: #69bdde; }
+.skill-icon.status-applied { color: white; background: #8b79dd; }
+.skill-icon.status-retained { color: #6e4e05; background: #ffd65a; }
 .skill-row b,
 .skill-row small { display: block; }
 .skill-row b { font-size: 14px; }
 .skill-row small { color: #74868c; font-size: 9px; }
-.skill-row i { color: #7c9088; font-size: 9px; font-style: normal; font-weight: 850; }
+.skill-row i { max-width: 150px; color: #7c9088; font-size: 9px; font-style: normal; font-weight: 850; text-align: right; }
 .empty-report { padding: 25px; color: #74868c; text-align: center; }
 .parent-tip { display: flex; gap: 12px; margin: 14px 0; padding: 14px; border-radius: 20px; background: #fff4cf; }
 .parent-tip > span { font-size: 31px; }
@@ -1183,7 +1201,7 @@ button:disabled {
   .map-topbar { min-height: 78px; }
   .brand-pill { min-height: 54px; }
   .brand-pill span { width: 38px; height: 38px; font-size: 27px; }
-  .icon-button { width: 52px; height: 52px; min-width: 52px; min-height: 52px; }
+  .icon-button { width: 56px; height: 56px; min-width: 56px; min-height: 56px; }
   .welcome-content { display: flex; flex-direction: column; min-height: auto; padding-top: 24px; }
   .welcome-copy { order: 2; text-align: center; }
   .welcome-copy h1 { margin-top: 13px; font-size: clamp(42px, 11vw, 66px); }
@@ -1244,7 +1262,7 @@ button:disabled {
 
 @media (max-width: 520px) {
   .brand-pill b { font-size: 15px; }
-  .top-actions .icon-button { width: 48px; height: 48px; min-width: 48px; min-height: 48px; }
+  .top-actions .icon-button { width: 56px; height: 56px; min-width: 56px; min-height: 56px; }
   .welcome-art { min-height: 310px; }
   .hero-island { padding: 20px; }
   .stage-tabs button small { display: none; }
