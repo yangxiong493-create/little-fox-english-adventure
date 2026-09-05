@@ -27,8 +27,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Build
-        run: npm run build
+      - name: Validate and build
+        run: npm run check
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

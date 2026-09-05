@@ -2,16 +2,25 @@ import { VOICE_LINES } from './gameData.js';
 
 const MUSIC_LEVEL = 0.15;
 const MUSIC_FADE_SECONDS = 0.65;
+const AUDIO_WAIT_MS = 8_000;
+
+function within(promise, milliseconds = AUDIO_WAIT_MS) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Audio timed out')), milliseconds); }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function audioUrl(key) {
-  return `${import.meta.env.BASE_URL}audio/voice/${key}.mp3`;
+  return `${import.meta.env?.BASE_URL || './'}audio/voice/${key}.mp3`;
 }
 
 function musicUrl() {
-  return `${import.meta.env.BASE_URL}audio/music/spring-field.mp3`;
+  return `${import.meta.env?.BASE_URL || './'}audio/music/spring-field.mp3`;
 }
 
-class GameAudioEngine {
+export class GameAudioEngine {
   constructor() {
     this.context = null;
     this.voiceGain = null;
@@ -24,6 +33,7 @@ class GameAudioEngine {
     this.voiceActive = false;
     this.feedbackSource = null;
     this.currentVoice = null;
+    this.cancelFallback = null;
     this.buffers = new Map();
     this.pending = new Map();
     this.intent = 0;
@@ -35,7 +45,7 @@ class GameAudioEngine {
   }
 
   publishDebug() {
-    if (!import.meta.env.DEV || typeof document === 'undefined') return;
+    if (!import.meta.env?.DEV || typeof document === 'undefined') return;
     const snapshot = this.debugSnapshot();
     document.documentElement.dataset.audioBuffered = String(snapshot.bufferedCount);
     document.documentElement.dataset.audioPending = String(snapshot.pendingCount);
@@ -92,7 +102,7 @@ class GameAudioEngine {
     const resumed = context.state === 'suspended' ? context.resume() : Promise.resolve();
     if (feedback) this.playFeedback();
     if (this.musicAllowed) this.startMusic();
-    return resumed.then(() => context.state === 'running').catch(() => false);
+    return within(resumed).then(() => context.state === 'running').catch(() => false);
   }
 
   setEnabled(enabled) {
@@ -113,13 +123,22 @@ class GameAudioEngine {
     if (!context) throw new Error('Web Audio is unavailable');
 
     const pending = (async () => {
-      const response = await fetch(audioUrl(key), { cache: 'force-cache' });
-      if (!response.ok) throw new Error(`Voice ${key} returned ${response.status}`);
-      const bytes = await response.arrayBuffer();
-      const decoded = await context.decodeAudioData(bytes);
-      this.buffers.set(key, decoded);
-      this.publishDebug();
-      return decoded;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), AUDIO_WAIT_MS);
+      try {
+        const response = await fetch(audioUrl(key), { cache: 'force-cache', signal: controller.signal });
+        if (!response.ok) throw new Error(`Voice ${key} returned ${response.status}`);
+        const bytes = await response.arrayBuffer();
+        const decoded = await within(context.decodeAudioData(bytes));
+        this.buffers.set(key, decoded);
+        // Keep decoded PCM bounded on iPads; the service worker retains files
+        // for offline use, so replaying an evicted clip needs no network.
+        if (this.buffers.size > 64) this.buffers.delete(this.buffers.keys().next().value);
+        this.publishDebug();
+        return decoded;
+      } finally {
+        clearTimeout(timeout);
+      }
     })();
     this.pending.set(key, pending);
     try {
@@ -254,6 +273,7 @@ class GameAudioEngine {
   }
 
   cancelCurrentVoice() {
+    this.cancelFallback?.();
     window.speechSynthesis?.cancel();
     if (!this.currentVoice) return;
     const current = this.currentVoice;
@@ -295,10 +315,13 @@ class GameAudioEngine {
         if (settled) return;
         settled = true;
         window.clearTimeout(timer);
+        if (this.cancelFallback === cancel) this.cancelFallback = null;
         resolve(Boolean(completed) && intent === this.intent && this.enabled);
       };
+      const cancel = () => finish(false);
+      this.cancelFallback = cancel;
       const timer = window.setTimeout(() => {
-        window.speechSynthesis.cancel();
+        if (intent === this.intent) window.speechSynthesis.cancel();
         finish(false);
       }, timeoutMs);
       try {
@@ -336,7 +359,11 @@ class GameAudioEngine {
     source.buffer = buffer;
     source.connect(this.voiceGain);
     return new Promise((resolve) => {
+      let settled = false;
       const settle = (finished) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(watchdog);
         if (this.currentVoice?.source === source) this.currentVoice = null;
         if (this.currentKey === key) this.currentKey = null;
         source.onended = null;
@@ -344,11 +371,15 @@ class GameAudioEngine {
         this.publishDebug();
         resolve(finished && intent === this.intent && this.enabled);
       };
+      const watchdog = window.setTimeout(() => {
+        try { source.stop(); } catch { /* Already stopped. */ }
+        settle(false);
+      }, buffer.duration * 1000 + AUDIO_WAIT_MS);
       this.currentVoice = { source, resolve: (finished) => settle(finished) };
       this.currentKey = key;
       this.lastVoiceStartedAt = performance.now();
       source.onended = () => settle(true);
-      source.start();
+      try { source.start(); } catch { settle(false); }
       this.publishDebug();
     });
   }
@@ -405,4 +436,4 @@ class GameAudioEngine {
 
 export const gameAudio = new GameAudioEngine();
 
-if (import.meta.env.DEV && typeof window !== 'undefined') window.__littleFoxAudio = gameAudio;
+if (import.meta.env?.DEV && typeof window !== 'undefined') window.__littleFoxAudio = gameAudio;

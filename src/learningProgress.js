@@ -147,6 +147,7 @@ function markLegacyEncounters(learning, completedIds, now) {
 }
 
 export function normalizeProgress(saved = {}, { legacy = false, now = Date.now() } = {}) {
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
   const completedIds = Array.isArray(saved.completedIds)
     ? [...new Set(saved.completedIds.filter(validMissionId))].sort((a, b) => a - b)
     : [];
@@ -157,10 +158,11 @@ export function normalizeProgress(saved = {}, { legacy = false, now = Date.now()
     }
   }
 
-  if (legacy || completedIds.length > 0) markLegacyEncounters(learning, completedIds, now);
-
   const lastMissionId = validMissionId(saved.lastMissionId) ? saved.lastMissionId : null;
   const migrating = legacy || (Number.isInteger(saved.schemaVersion) && saved.schemaVersion < PROGRESS_SCHEMA_VERSION);
+  // Only a real migration may infer encounters. A current save can contain
+  // stories played silently, without any listening evidence.
+  if (migrating) markLegacyEncounters(learning, completedIds, now);
   const savedUnlockedStage = Number.isInteger(saved.legacyUnlockedStage)
     ? Math.max(0, saved.legacyUnlockedStage)
     : 0;
@@ -176,6 +178,21 @@ export function normalizeProgress(saved = {}, { legacy = false, now = Date.now()
     audioOn: saved.audioOn !== false,
     learning,
     legacyUnlockedStage,
+    activeLesson: normalizeActiveLesson(saved.activeLesson),
+  };
+}
+
+export function normalizeActiveLesson(value) {
+  if (!value || !validMissionId(value.missionId)) return null;
+  const mission = MISSIONS[value.missionId - 1];
+  if (!Number.isInteger(value.stepIndex) || value.stepIndex < 0 || value.stepIndex > 3) return null;
+  return {
+    missionId: mission.id,
+    stepIndex: value.stepIndex,
+    roundIndex: Number.isInteger(value.roundIndex)
+      ? Math.max(0, Math.min(value.roundIndex, mission.rounds.length - 1)) : 0,
+    attempts: Number.isInteger(value.attempts) ? Math.max(0, value.attempts) : 0,
+    hintLevel: Number.isInteger(value.hintLevel) ? Math.max(0, Math.min(3, value.hintLevel)) : 0,
   };
 }
 

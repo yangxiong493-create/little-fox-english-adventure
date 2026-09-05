@@ -9,7 +9,7 @@ export default defineConfig({
       filename: 'sw.js',
       injectRegister: false,
       manifest: false,
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       strategies: 'generateSW',
       workbox: {
         cleanupOutdatedCaches: true,
@@ -18,7 +18,7 @@ export default defineConfig({
         // complete adventure after one online visit.
         globPatterns: ['**/*.{html,js,css,png,svg,webmanifest,mp3}'],
         navigateFallback: 'index.html',
-        skipWaiting: true,
+        skipWaiting: false,
       },
     }),
   ],

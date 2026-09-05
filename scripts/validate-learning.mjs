@@ -6,6 +6,7 @@ import {
   getReviewSuggestion,
   getStageReadiness,
   normalizeProgress,
+  normalizeActiveLesson,
   recordExposure,
   recordMasteryEvidence,
 } from '../src/learningProgress.js';
@@ -205,3 +206,36 @@ assert.equal(changedContextReview?.itemId, 'cat', 'The weak Learning Item should
 assert.notEqual(changedContextReview?.mission.id, 15, 'Weak evidence should return in a different Mission context');
 
 console.log('Validated learning evidence, mastery states, review scheduling, Stage Readiness, and legacy migration.');
+
+const silentSave = normalizeProgress({ schemaVersion: 5, completedIds: [1, 2, 3], audioOn: false });
+assert.deepEqual(silentSave.learning, {}, 'Reloading current silent stories must not invent encounters');
+assert.deepEqual(normalizeProgress(JSON.parse(JSON.stringify(silentSave))).learning, {}, 'Repeated reloads must preserve the absence of listening evidence');
+assert.equal(getStageReadiness(silentSave, 1).unlocked, false, 'Silent stories alone must not satisfy listening readiness');
+assert.doesNotThrow(() => normalizeProgress(null), 'Corrupt or null storage should safely initialize');
+assert.equal(normalizeActiveLesson({ missionId: 60, stepIndex: 2 }), null);
+assert.equal(normalizeActiveLesson({ missionId: 17, stepIndex: 4 }), null, 'Completed rewards must not become unfinished lessons');
+const paused = normalizeProgress({ schemaVersion: 5, activeLesson: { missionId: 17, stepIndex: 2, roundIndex: 1, attempts: 2, hintLevel: 2 } });
+assert.deepEqual(normalizeProgress(JSON.parse(JSON.stringify(paused))).activeLesson, paused.activeLesson, 'Resume must preserve the current round and prior help');
+assert.equal(normalizeActiveLesson({ missionId: 17, stepIndex: 2, roundIndex: 999 }).roundIndex, 1, 'Stale checkpoints must stay within the mission');
+const singleChoice = evidence(normalizeProgress(), { itemId: 'fox', missionId: 1, roundIndex: 0, occurredAt: startedAt, choicesCount: 1 });
+assert.equal(deriveLearningState(singleChoice.learning.fox).status, 'met', 'One-choice interactions cannot prove discrimination');
+console.log('Validated silent reloads, invalid storage, and lesson resume checkpoints.');
+
+let curriculumProgress = normalizeProgress();
+let curriculumTime = startedAt;
+for (const mission of MISSIONS) {
+  assert.equal(getStageReadiness(curriculumProgress, mission.stage).unlocked, true,
+    `Mission ${mission.id} must be reachable using real evidence from earlier stories`);
+  for (const itemId of mission.meet) {
+    curriculumProgress = recordExposure(curriculumProgress, { itemId, missionId: mission.id, occurredAt: curriculumTime++ });
+  }
+  for (const [roundIndex, round] of mission.rounds.entries()) {
+    curriculumProgress = recordMasteryEvidence(curriculumProgress, {
+      itemIds: round.learningItems, missionId: mission.id, roundIndex,
+      mode: round.mode, choicesCount: round.choices.length,
+      attempts: 0, hintLevel: 0, assisted: false, occurredAt: curriculumTime++,
+    });
+  }
+  curriculumProgress = { ...curriculumProgress, completedIds: [...curriculumProgress.completedIds, mission.id] };
+}
+console.log('Validated all 59 missions are reachable using actual curriculum evidence.');

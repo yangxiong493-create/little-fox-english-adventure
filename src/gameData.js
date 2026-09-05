@@ -916,6 +916,8 @@ export const MISSIONS = [
       round('red_ball', ['blue_ball', 'red_ball'], 'prompt_red_ball', 'Find the red ball.', 'valley-color'),
       round('blue_apple', ['red_apple', 'blue_apple'], 'prompt_blue_apple', 'Find the blue apple.', 'valley-color'),
       round('red_apple', ['blue_apple', 'red_ball', 'red_apple'], 'prompt_red_apple', 'Find the red apple.', 'valley-color'),
+      // Append new beats so saved mission/round evidence keeps its identity.
+      round('blue_ball', ['blue_apple', 'blue_ball', 'red_ball'], 'prompt_blue_ball', 'Find the blue ball.', 'valley-color'),
     ],
     echo: 'blue_apple',
     worldChange: '红蓝宝物排成一座会变色的桥',
@@ -959,6 +961,7 @@ export const MISSIONS = [
       round('small', ['big', 'small'], 'word_small', 'Small.', 'valley-size'),
       round('small_cat', ['cat', 'small_cat'], 'prompt_small_cat', 'Find the small cat.', 'valley-size'),
       round('big_dog', ['small_cat', 'big_dog'], 'prompt_big_dog', 'Find the big dog.', 'valley-size'),
+      round('small_cat', ['small_cat', 'cat', 'big_dog'], 'prompt_small_cat', 'Find the small cat.', 'valley-size'),
     ],
     echo: 'small_cat',
     worldChange: '秘密门打开，彩色山谷亮起星星灯',

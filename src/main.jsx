@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ITEMS, MISSIONS, STAGES, VOICE_LINES, getMission } from './gameData.js';
 import { gameAudio } from './audioEngine.js';
+import { applyPwaUpdate, hasPwaUpdate, setLessonActive } from './pwaUpdates.js';
 import {
   LEARNING_STATUS,
   getLearningState,
@@ -8,6 +9,7 @@ import {
   getReviewSuggestion,
   getStageReadiness,
   normalizeProgress,
+  normalizeActiveLesson,
   recordExposure,
   recordMasteryEvidence,
 } from './learningProgress.js';
@@ -23,6 +25,8 @@ const LESSON_STEPS = [
 
 const PROGRESS_STORAGE_KEY = 'little-fox-progress-v5';
 const LEGACY_PROGRESS_STORAGE_KEYS = ['little-fox-progress-v4', 'little-fox-progress-v3', 'little-fox-progress-v2'];
+const PREVIEW_MISSION = import.meta.env.DEV
+  ? getMission(Number(new URLSearchParams(window.location.search).get('previewMission'))) : null;
 const PLACEMENT_MODES = new Set(['forest-give', 'forest-put', 'town-share', 'castle-give', 'castle-put']);
 const CRITICAL_VOICE_KEYS = [
   'zh_welcome', 'welcome', 'zh_meet', 'zh_listen_choose', 'zh_try_again',
@@ -46,17 +50,14 @@ function parseStoredProgress(raw) {
 
 function readSavedProgress() {
   try {
-    if (import.meta.env.DEV) {
-      const previewMissionId = Number(new URLSearchParams(window.location.search).get('previewMission'));
-      const previewMission = getMission(previewMissionId);
-      if (previewMission) {
-        return normalizeProgress({
-          completedIds: MISSIONS.filter((mission) => mission.id < previewMissionId).map((mission) => mission.id),
-          lastMissionId: Math.max(1, previewMissionId - 1),
-          legacyUnlockedStage: previewMission.stage,
-          audioOn: true,
-        });
-      }
+    if (PREVIEW_MISSION) {
+      const previewMissionId = PREVIEW_MISSION.id;
+      return normalizeProgress({
+        completedIds: MISSIONS.filter((mission) => mission.id < previewMissionId).map((mission) => mission.id),
+        lastMissionId: Math.max(1, previewMissionId - 1),
+        legacyUnlockedStage: PREVIEW_MISSION.stage,
+        audioOn: true,
+      });
     }
     const current = parseStoredProgress(window.localStorage.getItem(PROGRESS_STORAGE_KEY));
     if (current) return normalizeProgress(current);
@@ -83,13 +84,12 @@ function useGameAudio(audioOn) {
 
   useEffect(() => {
     void gameAudio.preload(CRITICAL_VOICE_KEYS, { concurrency: 4 });
-    const preloadAll = () => {
+    const prepareBackgroundMusic = () => {
       gameAudio.prepareMusic();
-      void gameAudio.preload(Object.keys(VOICE_LINES), { concurrency: 4 });
     };
     const idleId = 'requestIdleCallback' in window
-      ? window.requestIdleCallback(preloadAll, { timeout: 1800 })
-      : window.setTimeout(preloadAll, 500);
+      ? window.requestIdleCallback(prepareBackgroundMusic, { timeout: 1800 })
+      : window.setTimeout(prepareBackgroundMusic, 500);
     return () => {
       if ('cancelIdleCallback' in window) window.cancelIdleCallback(idleId);
       else window.clearTimeout(idleId);
@@ -110,6 +110,8 @@ export default function App() {
   const [parentOpen, setParentOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [clock, setClock] = useState(() => Date.now());
+  const [storageAvailable, setStorageAvailable] = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(hasPwaUpdate);
   const { play, playSequence, stop, unlock, setMusicAllowed } = useGameAudio(progress.audioOn);
 
   const completedSet = useMemo(() => new Set(progress.completedIds), [progress.completedIds]);
@@ -138,10 +140,12 @@ export default function App() {
   }, [nextMission]);
 
   useEffect(() => {
+    if (PREVIEW_MISSION) return;
     try {
       window.localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progress));
+      setStorageAvailable(true);
     } catch {
-      // Private browsing can prevent persistence; play remains available.
+      setStorageAvailable(false);
     }
   }, [progress]);
 
@@ -153,11 +157,12 @@ export default function App() {
 
   useEffect(() => {
     setMusicAllowed(screen !== 'lesson');
+    setLessonActive(screen === 'lesson');
   }, [screen, setMusicAllowed]);
 
   useEffect(() => {
     const offlineReady = () => setToast('✓ 声音和关卡已缓存，断网也能玩');
-    const updateReady = () => setToast('✨ 新版本已准备好，下次打开自动更新');
+    const updateReady = () => setUpdateAvailable(true);
     window.addEventListener('little-fox-offline-ready', offlineReady);
     window.addEventListener('little-fox-update-ready', updateReady);
     return () => {
@@ -203,12 +208,19 @@ export default function App() {
     setProgress((value) => ({
       ...value,
       legacyUnlockedStage: Math.max(value.legacyUnlockedStage, mission.stage),
+      activeLesson: value.activeLesson?.missionId === id ? value.activeLesson
+        : normalizeActiveLesson({ missionId: id, stepIndex: 0 }),
     }));
+    setLessonActive(true);
     setMusicAllowed(false);
+    void unlock();
     setMissionId(id);
     setScreen('lesson');
-    void playSequence([mission.introAudio, 'zh_story_next'], { feedback: true });
   };
+
+  const saveCheckpoint = useCallback((checkpoint) => {
+    setProgress((value) => ({ ...value, activeLesson: normalizeActiveLesson(checkpoint) }));
+  }, []);
 
   const recordExposureEvent = useCallback((evidence) => {
     setProgress((value) => (value.audioOn ? recordExposure(value, evidence) : value));
@@ -220,11 +232,12 @@ export default function App() {
 
   const completeMission = (id) => {
     setProgress((value) => {
-      if (value.completedIds.includes(id)) return { ...value, lastMissionId: id };
+      if (value.completedIds.includes(id)) return { ...value, lastMissionId: id, activeLesson: null };
       return {
         ...value,
         completedIds: [...value.completedIds, id].sort((a, b) => a - b),
         lastMissionId: id,
+        activeLesson: null,
       };
     });
   };
@@ -239,11 +252,14 @@ export default function App() {
   return (
     <main className={`app-shell screen-${screen}`}>
       <SkyDecor />
+      {!storageAvailable && <div className="storage-notice" role="status">本次仍然可以玩，但浏览器暂时无法保存进度。请家长检查存储空间或浏览器设置。</div>}
+      {updateAvailable && screen !== 'lesson' && <div className="update-notice" role="status"><span>✨ 新版本准备好了，学习脚印会保留</span><button type="button" onClick={applyPwaUpdate}>更新应用</button></div>}
       {screen === 'welcome' && (
         <WelcomeScreen
           nextMission={nextMission}
           reviewSuggestion={reviewSuggestion}
           completedCount={progress.completedIds.length}
+          activeLesson={progress.activeLesson}
           onStart={openMap}
           onParent={() => setParentGateOpen(true)}
           audioOn={progress.audioOn}
@@ -276,6 +292,10 @@ export default function App() {
           onExposure={recordExposureEvent}
           onEvidence={recordMasteryEvidenceEvent}
           alreadyCompleted={completedSet.has(activeMission.id)}
+          checkpoint={progress.activeLesson}
+          onCheckpoint={saveCheckpoint}
+          audioOn={progress.audioOn}
+          onAudio={toggleAudio}
         />
       )}
 
@@ -297,6 +317,7 @@ export default function App() {
           now={clock}
           setAudioOn={(audioOn) => setAudioPreference(audioOn, { feedback: audioOn })}
           onClose={() => setParentOpen(false)}
+          onReview={(id) => { setParentOpen(false); startMission(id); }}
         />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
@@ -325,9 +346,9 @@ function IconButton({ children, label, onClick, className = '' }) {
   );
 }
 
-function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, onStart, onParent, audioOn, onAudio }) {
+function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, activeLesson, onStart, onParent, audioOn, onAudio }) {
   const allDone = completedCount === MISSIONS.length;
-  const startNote = reviewSuggestion
+  const startNote = activeLesson ? `接着帮助小狐：${getMission(activeLesson.missionId).title}` : reviewSuggestion
     ? `小狐想再听一次 ${ITEMS[reviewSuggestion.itemId].display}`
     : allDone
       ? '再去看看岛上朋友'
@@ -350,7 +371,7 @@ function WelcomeScreen({ nextMission, reviewSuggestion, completedCount, onStart,
           <button className="primary-cta" onClick={onStart} type="button" data-testid="welcome-start">
             <span className="cta-icon">▶</span>
             <span>
-              <b>{completedCount ? '继续冒险' : '第一次出发'}</b>
+              <b>{completedCount || activeLesson ? '继续冒险' : '第一次出发'}</b>
               <small>{startNote}</small>
             </span>
             <span className="cta-arrow">›</span>
@@ -374,7 +395,7 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
   const { completedIds, audioOn } = progress;
   const completedSet = useMemo(() => new Set(completedIds), [completedIds]);
   const nextStageUnlocked = getStageReadiness(progress, nextMission?.stage ?? 0).unlocked;
-  const suggestedStage = nextStageUnlocked
+  const suggestedStage = progress.activeLesson ? getMission(progress.activeLesson.missionId).stage : nextStageUnlocked
     ? nextMission?.stage ?? 0
     : reviewSuggestion?.mission.stage ?? Math.max(0, (nextMission?.stage ?? 1) - 1);
   const [stageId, setStageId] = useState(suggestedStage);
@@ -389,9 +410,10 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
     return 'locked';
   };
 
-  const cardMission = reviewSuggestion?.mission || nextMission;
-  const reviewItem = reviewSuggestion ? ITEMS[reviewSuggestion.itemId] : null;
-  const cardKicker = reviewSuggestion
+  const resumeMission = progress.activeLesson ? getMission(progress.activeLesson.missionId) : null;
+  const cardMission = resumeMission || reviewSuggestion?.mission || nextMission;
+  const reviewItem = !resumeMission && reviewSuggestion ? ITEMS[reviewSuggestion.itemId] : null;
+  const cardKicker = resumeMission ? '已经记住你的位置，接着帮帮朋友吧' : reviewSuggestion
     ? reviewSuggestion.reason === 'stage-readiness'
       ? '再确认一个熟悉的声音，新世界就准备好了'
       : '到了自然复习的时间'
@@ -404,7 +426,7 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
       <header className="map-topbar">
         <div className="profile-chip"><span>🦊</span><div><b>小小探险家</b><small lang="en">HELLO ISLAND</small></div></div>
         <div className="world-progress" aria-label={`总进度 ${completedIds.length} / ${MISSIONS.length}`}>
-          <span>冒险花园</span>
+          <span>全岛故事</span>
           <div className="progress-track"><i style={{ width: `${(completedIds.length / MISSIONS.length) * 100}%` }} /></div>
           <b>{completedIds.length} / {MISSIONS.length}</b>
         </div>
@@ -416,16 +438,22 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
         </div>
       </header>
 
-      <div className="stage-tabs" role="tablist" aria-label="选择冒险世界">
+      <div className={`next-mission-card ${reviewItem ? 'is-review' : ''}`}>
+        <div className="guide-face">🦊</div>
+        <div className="next-copy"><small>{cardKicker}</small><b>{reviewItem ? `再听听 ${reviewItem.display}` : cardMission.title}</b><span>{reviewItem ? `回到「${cardMission.title}」换个场景试试` : cardMission.english}</span></div>
+        <div className="mini-goals">{reviewItem ? <><span>👂 再听</span><span>🖐️ 换场景</span><span>🌱 留下学习脚印</span></> : <><span>👂 听</span><span>🖐️ 玩</span><span>🌟 改变世界</span></>}</div>
+        <button className="go-button" onClick={() => onMission(cardMission.id)} type="button" data-testid={resumeMission ? 'resume-start' : reviewSuggestion ? 'review-start' : 'next-start'}>{resumeMission ? '继续' : reviewSuggestion ? '复习' : '出发'} <span>→</span></button>
+      </div>
+
+      <div className="stage-tabs" role="group" aria-label="选择冒险世界">
         {STAGES.map((item) => {
           const unlocked = getStageReadiness(progress, item.id).unlocked;
           return (
             <button
               key={item.id}
               className={`${stageId === item.id ? 'is-current' : ''} ${unlocked ? '' : 'is-locked'}`}
-              onClick={() => unlocked ? setStageId(item.id) : onToast('🌱 小狐想先复习几个熟悉的声音')}
-              role="tab"
-              aria-selected={stageId === item.id}
+              onClick={() => unlocked ? setStageId(item.id) : onToast(getStageReadiness(progress, item.id).completedPreviousStage ? '🌱 和小狐再听听熟悉的声音，新世界就准备好了' : '🗺️ 先完成前一个世界的故事吧')}
+              aria-pressed={stageId === item.id}
               aria-disabled={!unlocked}
               type="button"
             >
@@ -471,39 +499,37 @@ function MapScreen({ progress, nextMission, nextIncomplete, reviewSuggestion, on
           })}
         </div>
       </section>
-
-      <div className={`next-mission-card ${reviewSuggestion ? 'is-review' : ''}`}>
-        <div className="guide-face">🦊</div>
-        <div className="next-copy"><small>{cardKicker}</small><b>{reviewItem ? `再听听 ${reviewItem.display}` : cardMission.title}</b><span>{reviewItem ? `回到「${cardMission.title}」换个场景试试` : cardMission.english}</span></div>
-        <div className="mini-goals">{reviewSuggestion ? <><span>👂 再听</span><span>🖐️ 换场景</span><span>🌱 留下学习脚印</span></> : <><span>👂 听</span><span>🖐️ 玩</span><span>🌟 改变世界</span></>}</div>
-        <button className="go-button" onClick={() => onMission(cardMission.id)} type="button" data-testid={reviewSuggestion ? 'review-start' : 'next-start'}>{reviewSuggestion ? '复习' : '出发'} <span>→</span></button>
-      </div>
     </section>
   );
 }
 
-function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExposure, onEvidence, alreadyCompleted }) {
-  const [stepIndex, setStepIndex] = useState(0);
+function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExposure, onEvidence, alreadyCompleted, checkpoint, onCheckpoint, audioOn, onAudio }) {
+  const initialCheckpoint = useRef(checkpoint?.missionId === mission.id ? checkpoint : null).current;
+  const [stepIndex, setStepIndex] = useState(initialCheckpoint?.stepIndex || 0);
   const completionRecorded = useRef(false);
   const replayAtStart = useRef(alreadyCompleted).current;
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [stepIndex]);
+    if (stepIndex === 0) void playSequence([mission.introAudio, 'zh_story_next'], { feedback: true });
+    if (stepIndex === 1) void play('zh_meet', { feedback: true });
+    if (stepIndex === 3) void play('zh_echo_detail');
+    if (stepIndex === 4) void playSequence(['zh_reward', 'reward_done', 'zh_reward_next']);
+  }, [stepIndex, mission, play, playSequence]);
+
+  const moveToStep = (index) => {
+    onCheckpoint({ missionId: mission.id, stepIndex: index, roundIndex: 0 });
+    setStepIndex(index);
+  };
 
   const goToMeet = () => {
-    onExposure({ itemId: mission.meet[0], missionId: mission.id });
-    setStepIndex(1);
-    void playSequence(['zh_meet', ITEMS[mission.meet[0]].audio], { feedback: true });
+    moveToStep(1);
   };
   const goToChallenge = () => {
-    setStepIndex(2);
-    const guide = mission.stage === 5 ? 'zh_story_order' : 'zh_listen_choose';
-    void playSequence([guide, mission.rounds[0].audio], { feedback: true });
+    moveToStep(2);
   };
   const goToEcho = () => {
-    setStepIndex(3);
-    void play('zh_echo_detail');
+    moveToStep(3);
   };
   const goToReward = () => {
     if (!completionRecorded.current) {
@@ -511,13 +537,12 @@ function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExpo
       onComplete(mission.id);
     }
     setStepIndex(4);
-    void playSequence(['zh_reward', 'reward_done', 'zh_reward_next']);
   };
 
   return (
     <section className={`lesson-screen lesson-stage-${mission.stage}`}>
       <header className="lesson-topbar page-pad">
-        <button className="back-button" onClick={onClose} type="button" aria-label="退出关卡">‹</button>
+        <button className="back-button" onClick={onClose} type="button" aria-label="保存并回到地图">‹</button>
         <div className="lesson-title"><span>{mission.icon}</span><div><b>{mission.title}</b><small lang="en">{mission.english}</small></div></div>
         <div className="lesson-progress">
           {LESSON_STEPS.map((step, index) => (
@@ -527,13 +552,14 @@ function LessonScreen({ mission, play, playSequence, onClose, onComplete, onExpo
           ))}
           <span className="lesson-progress-line"><i style={{ width: `${(stepIndex / (LESSON_STEPS.length - 1)) * 100}%` }} /></span>
         </div>
-        <div className="lesson-count">{stepIndex + 1}<span> / {LESSON_STEPS.length}</span></div>
+        <div className="lesson-tools"><div className="lesson-count">{stepIndex + 1}<span> / {LESSON_STEPS.length}</span></div><IconButton label={audioOn ? '关闭声音' : '打开声音'} onClick={onAudio}>{audioOn ? '🔊' : '🔇'}</IconButton></div>
       </header>
+      {!audioOn && <div className="lesson-audio-note">🔇 现在是静音故事 · 点右上角喇叭可以听声音</div>}
 
       <div className="lesson-stage page-pad" key={stepIndex}>
         {stepIndex === 0 && <StoryStep mission={mission} play={play} onNext={goToMeet} />}
-        {stepIndex === 1 && <MeetStep mission={mission} play={play} onExposure={onExposure} onNext={goToChallenge} />}
-        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} playSequence={playSequence} onEvidence={onEvidence} onNext={goToEcho} />}
+        {stepIndex === 1 && <MeetStep mission={mission} play={play} audioOn={audioOn} onExposure={onExposure} onNext={goToChallenge} />}
+        {stepIndex === 2 && <ChallengeStep mission={mission} play={play} playSequence={playSequence} audioOn={audioOn} onEvidence={onEvidence} onNext={goToEcho} checkpoint={initialCheckpoint?.stepIndex === 2 ? initialCheckpoint : null} onCheckpoint={onCheckpoint} />}
         {stepIndex === 3 && <EchoStep mission={mission} play={play} onNext={goToReward} />}
         {stepIndex === 4 && <RewardStep mission={mission} onMap={onClose} replay={replayAtStart} />}
       </div>
@@ -565,7 +591,7 @@ function StoryStep({ mission, play, onNext }) {
   );
 }
 
-function MeetStep({ mission, play, onExposure, onNext }) {
+function MeetStep({ mission, play, audioOn, onExposure, onNext }) {
   const [touchesByItem, setTouchesByItem] = useState(() => Object.fromEntries(mission.meet.map((itemId) => [itemId, 0])));
   const [lastTouched, setLastTouched] = useState('');
   const [handTarget, setHandTarget] = useState('');
@@ -573,6 +599,9 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   const guidanceTimersRef = useRef([]);
   const doneAnnouncedRef = useRef(false);
   const mountedRef = useRef(true);
+  const playingRef = useRef(false);
+  const [playingItem, setPlayingItem] = useState('');
+  const [audioUnavailable, setAudioUnavailable] = useState(false);
   const requiredPerItem = mission.meetRepeats;
   const totalRequired = mission.meet.length * requiredPerItem;
   const totalTouches = mission.meet.reduce((sum, itemId) => sum + Math.min(touchesByItem[itemId] || 0, requiredPerItem), 0);
@@ -583,18 +612,19 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   useEffect(() => {
     guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     guidanceTimersRef.current = [];
-    if (ready || !nextItemId) return undefined;
+    if (ready || !nextItemId || playingItem) return undefined;
     const handTimer = window.setTimeout(() => setHandTarget(nextItemId), 5500);
     const replayTimer = window.setTimeout(() => {
-      onExposure({ itemId: nextItemId, missionId: mission.id });
-      void play(ITEMS[nextItemId].audio);
+      void play(ITEMS[nextItemId].audio).then((finished) => {
+        if (finished && mountedRef.current) onExposure({ itemId: nextItemId, missionId: mission.id });
+      });
     }, 5900);
     guidanceTimersRef.current = [handTimer, replayTimer];
     return () => {
       window.clearTimeout(handTimer);
       window.clearTimeout(replayTimer);
     };
-  }, [mission.id, nextItemId, nextItemTouches, onExposure, play, ready]);
+  }, [mission.id, nextItemId, nextItemTouches, onExposure, play, ready, playingItem]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -605,26 +635,33 @@ function MeetStep({ mission, play, onExposure, onNext }) {
     };
   }, []);
 
-  const touchItem = (itemId) => {
-    if (ready) return;
+  const touchItem = async (itemId) => {
+    if (playingRef.current) return;
+    playingRef.current = true;
+    setPlayingItem(itemId);
     const item = ITEMS[itemId];
     guidanceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     guidanceTimersRef.current = [];
     setLastTouched(itemId);
     setHandTarget('');
+    const finished = await play(item.audio, { feedback: true });
+    if (!mountedRef.current) return;
+    playingRef.current = false;
+    setPlayingItem('');
+    setAudioUnavailable(audioOn && !finished);
+    if (finished) onExposure({ itemId, missionId: mission.id });
+    // A silent interaction may advance the story, but only a completed voice
+    // contributes an exposure. Failed playback offers a clear retry/continue.
+    if (audioOn && !finished) { setLastTouched(''); return; }
     const nextCount = Math.min((touchesByItem[itemId] || 0) + 1, requiredPerItem);
     const willBeReady = mission.meet.every((candidateId) => (
       candidateId === itemId ? nextCount : (touchesByItem[candidateId] || 0)
     ) >= requiredPerItem);
     setTouchesByItem((value) => ({ ...value, [itemId]: nextCount }));
-    onExposure({ itemId, missionId: mission.id });
-    void play(item.audio, { feedback: true }).then((finished) => {
-      if (finished && mountedRef.current && willBeReady && !doneAnnouncedRef.current) {
-        doneAnnouncedRef.current = true;
-        return play('zh_meet_done');
-      }
-      return undefined;
-    });
+    if (finished && willBeReady && !doneAnnouncedRef.current) {
+      doneAnnouncedRef.current = true;
+      void play('zh_meet_done');
+    }
     window.clearTimeout(touchTimerRef.current);
     touchTimerRef.current = window.setTimeout(() => setLastTouched(''), 600);
   };
@@ -634,12 +671,12 @@ function MeetStep({ mission, play, onExposure, onNext }) {
       <header className="activity-title">
         <span className="step-kicker">点一点，听一听</span>
         <h2>小狐先带你认识它</h2>
-        <div className="exposure-dots" aria-label={`已听 ${totalTouches} 次，共需要 ${totalRequired} 次`}>
+        <div className="exposure-dots" aria-label={`已完成 ${totalTouches} 次，共 ${totalRequired} 次`}>
           {Array.from({ length: totalRequired }, (_, index) => <i key={index} className={index < totalTouches ? 'is-on' : ''}>✦</i>)}
         </div>
       </header>
       <div className={`meet-items meet-count-${Math.min(mission.meet.length, 6)}`}>
-        {mission.meet.map((itemId, index) => {
+        {mission.meet.map((itemId) => {
           const item = ITEMS[itemId];
           return (
             <button
@@ -648,15 +685,18 @@ function MeetStep({ mission, play, onExposure, onNext }) {
               onClick={() => touchItem(itemId)}
               type="button"
               data-testid={`meet-${itemId}`}
+              disabled={Boolean(playingItem)}
+              aria-label={`${item.display}，${playingItem === itemId ? '正在播放' : '点一下听声音'}`}
             >
               {handTarget === itemId && <span className="demo-hand">☝️</span>}
-              <span>{item.emoji}</span><b lang="en">{item.display}</b><small>🔊</small>
+              <span>{item.emoji}</span><b lang="en">{item.display}</b><small>{playingItem === itemId ? '👂' : '🔊'}</small>
             </button>
           );
         })}
       </div>
       <div className="meet-footer">
-        {!ready && <div className="gentle-prompt">✨ 点一点击，再听听这个声音</div>}
+        {!ready && <div className="gentle-prompt" role="status">{playingItem ? '👂 听完这个声音，再点一下' : '✨ 点一点击，再听听这个声音'}</div>}
+        {audioUnavailable && <div className="audio-recovery" role="status"><p>声音暂时没播出来，可以再点一次，也可以先看故事。</p><button type="button" onClick={onNext}>先继续故事</button></div>}
         {ready && (
           <button className="primary-cta compact ready-pop" onClick={onNext} type="button" data-testid="meet-next">
             <span className="cta-icon">👂</span><span><b>我听见啦！</b><small>Now let’s play</small></span><span className="cta-arrow">›</span>
@@ -667,8 +707,8 @@ function MeetStep({ mission, play, onExposure, onNext }) {
   );
 }
 
-function ChallengeStep({ mission, play, playSequence, onEvidence, onNext }) {
-  const [roundIndex, setRoundIndex] = useState(0);
+function ChallengeStep({ mission, play, playSequence, audioOn, onEvidence, onNext, checkpoint, onCheckpoint }) {
+  const [roundIndex, setRoundIndex] = useState(checkpoint?.roundIndex || 0);
   const roundData = mission.rounds[roundIndex];
   const transitionTimerRef = useRef(null);
 
@@ -686,7 +726,7 @@ function ChallengeStep({ mission, play, playSequence, onEvidence, onNext }) {
     const nextIndex = roundIndex + 1;
     transitionTimerRef.current = window.setTimeout(() => {
       setRoundIndex(nextIndex);
-      void play(mission.rounds[nextIndex].audio);
+      onCheckpoint({ missionId: mission.id, stepIndex: 2, roundIndex: nextIndex });
     }, 240);
   };
 
@@ -695,14 +735,14 @@ function ChallengeStep({ mission, play, playSequence, onEvidence, onNext }) {
       <div className="round-dots" aria-label={`第 ${roundIndex + 1} 小步，共 ${mission.rounds.length} 小步`}>
         {mission.rounds.map((_, index) => <i key={index} className={index < roundIndex ? 'is-done' : index === roundIndex ? 'is-current' : ''} />)}
       </div>
-      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} roundIndex={roundIndex} play={play} playSequence={playSequence} onEvidence={onEvidence} onSolved={solved} />
+      <ChallengeRound key={`${mission.id}-${roundIndex}`} mission={mission} round={roundData} roundIndex={roundIndex} play={play} playSequence={playSequence} audioOn={audioOn} onEvidence={onEvidence} onSolved={solved} checkpoint={checkpoint?.roundIndex === roundIndex ? checkpoint : null} onCheckpoint={onCheckpoint} />
     </div>
   );
 }
 
-function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvidence, onSolved }) {
-  const [tries, setTries] = useState(0);
-  const [hintLevel, setHintLevel] = useState(0);
+function ChallengeRound({ mission, round, roundIndex, play, playSequence, audioOn, onEvidence, onSolved, checkpoint, onCheckpoint }) {
+  const [tries, setTries] = useState(checkpoint?.attempts || 0);
+  const [hintLevel, setHintLevel] = useState(checkpoint?.hintLevel || 0);
   const [activityTick, setActivityTick] = useState(0);
   const [wrongChoice, setWrongChoice] = useState('');
   const [status, setStatus] = useState('ready');
@@ -712,18 +752,44 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
   const evidenceRecordedRef = useRef(false);
   const finishingRef = useRef(false);
   const mountedRef = useRef(true);
+  const promptHeardRef = useRef(false);
+  const promptTokenRef = useRef(0);
+  const [listening, setListening] = useState(true);
+  const [audioUnavailable, setAudioUnavailable] = useState(false);
+
+  const listenToPrompt = useCallback(async (guide) => {
+    const token = ++promptTokenRef.current;
+    setListening(true);
+    const finished = await playSequence([guide, round.audio].filter(Boolean), { feedback: true });
+    if (!mountedRef.current || token !== promptTokenRef.current) return;
+    promptHeardRef.current ||= finished;
+    setListening(false);
+    setAudioUnavailable(!finished);
+  }, [playSequence, round.audio]);
 
   useEffect(() => {
-    if (status !== 'ready') return undefined;
+    mountedRef.current = true;
+    void listenToPrompt(roundIndex === 0 ? (mission.stage === 5 ? 'zh_story_order' : 'zh_listen_choose') : null);
+    return () => { mountedRef.current = false; promptTokenRef.current += 1; };
+  }, [listenToPrompt, mission.stage, roundIndex]);
+
+  useEffect(() => {
+    if (status === 'ready' || status === 'placing') {
+      onCheckpoint({ missionId: mission.id, stepIndex: 2, roundIndex, attempts: tries, hintLevel });
+    }
+  }, [mission.id, roundIndex, tries, hintLevel, status, onCheckpoint]);
+
+  useEffect(() => {
+    if (status !== 'ready' || listening) return undefined;
     const replayTimer = window.setTimeout(() => void playSequence(['zh_wait_help', round.audio]), 8200);
-    const motionTimer = window.setTimeout(() => setHintLevel(1), 11000);
-    const spotlightTimer = window.setTimeout(() => setHintLevel(2), 14000);
+    const motionTimer = window.setTimeout(() => setHintLevel((value) => Math.max(value, 1)), 11000);
+    const spotlightTimer = window.setTimeout(() => setHintLevel((value) => Math.max(value, 2)), 14000);
     return () => {
       window.clearTimeout(replayTimer);
       window.clearTimeout(motionTimer);
       window.clearTimeout(spotlightTimer);
     };
-  }, [activityTick, playSequence, round.audio, status, tries]);
+  }, [activityTick, playSequence, round.audio, status, tries, listening]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -737,7 +803,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
   const finish = (assisted = false, result = { attempts: tries, hintLevel }) => {
     if (finishingRef.current) return;
     finishingRef.current = true;
-    if (!evidenceRecordedRef.current) {
+    if (!evidenceRecordedRef.current && promptHeardRef.current) {
       evidenceRecordedRef.current = true;
       onEvidence({
         itemIds: round.learningItems || [round.target],
@@ -772,7 +838,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
   };
 
   const choose = (itemId) => {
-    if (status !== 'ready') return;
+    if (status !== 'ready' || listening || finishingRef.current) return;
     setActivityTick((value) => value + 1);
     if (itemId === round.target) {
       if (PLACEMENT_MODES.has(round.mode)) {
@@ -790,11 +856,11 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
     window.clearTimeout(wrongTimerRef.current);
     wrongTimerRef.current = window.setTimeout(() => setWrongChoice(''), 520);
     if (nextTries === 1) {
-      setHintLevel(1);
-      void playSequence(['zh_try_again', round.audio], { feedback: true });
+      setHintLevel((value) => Math.max(value, 1));
+      void listenToPrompt('zh_try_again');
     } else if (nextTries === 2) {
-      setHintLevel(2);
-      void play(round.audio, { feedback: true });
+      setHintLevel((value) => Math.max(value, 2));
+      void listenToPrompt();
     } else {
       setStatus('helping');
       setHintLevel(3);
@@ -821,7 +887,8 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
       <header className="activity-title">
         <span className="step-kicker">{mission.stage === 5 ? '故事进行到下一步' : '仔细听，小狐在说什么？'}</span>
         <h2 lang="en">{round.prompt}</h2>
-        <button className="big-audio-button" onClick={() => { setActivityTick((value) => value + 1); void play(round.audio, { feedback: true }); }} type="button" disabled={status !== 'ready'}><span>🔊</span><b>再听一次</b></button>
+        <button className="big-audio-button" onClick={() => { setActivityTick((value) => value + 1); void listenToPrompt(); }} type="button" disabled={status !== 'ready' || listening}><span>{listening ? '👂' : '🔊'}</span><b>{listening ? '先听小狐说完' : '再听一次'}</b></button>
+        {audioUnavailable && audioOn && <p className="audio-recovery" role="status">声音暂时没播出来。点喇叭重试，或先帮小狐完成故事。</p>}
       </header>
 
       <div className="challenge-scene">
@@ -849,6 +916,7 @@ function ChallengeRound({ mission, round, roundIndex, play, playSequence, onEvid
                 onClick={() => choose(itemId)}
                 type="button"
                 data-testid={`choice-${itemId}`}
+                disabled={status !== 'ready' || listening}
               >
                 {round.mode === 'reveal' && <span className="cover-emoji">🌿</span>}
                 {round.mode === 'hide' && <span className="cover-emoji">🎁</span>}
@@ -918,7 +986,7 @@ function EchoStep({ mission, play, onNext }) {
         <span className="step-kicker">想说就说，不说也能继续</span>
         <h2 lang="en">{item.display}</h2>
         <p>先听小狐说一遍，你愿意的话也可以跟着说。</p>
-        <button className="record-button" onClick={listen} type="button"><span>🔊</span><b>先听一遍</b><small>Tap to listen</small></button>
+        <button className="record-button" onClick={listen} type="button" disabled={isPlaying || finishing}><span>{isPlaying ? '👂' : '🔊'}</span><b>{isPlaying ? '小狐正在说' : '先听一遍'}</b><small>Tap to listen</small></button>
         <div className={`echo-actions ${heard ? 'is-ready' : ''}`}>
           <button onClick={() => finish(true)} type="button" disabled={finishing}><span>🎙️</span><b>我说好啦</b></button>
           <button onClick={() => finish(false)} type="button" disabled={finishing}><span>👋</span><b>这次先听</b></button>
@@ -951,6 +1019,13 @@ function Modal({ children, onClose, className = '', label = '弹窗' }) {
 
   useEffect(() => {
     const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    const layer = cardRef.current?.parentElement;
+    const background = [...(layer?.parentElement?.children || [])]
+      .filter((element) => element !== layer)
+      .map((element) => [element, element.inert]);
+    background.forEach(([element]) => { element.inert = true; });
+    document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -974,6 +1049,8 @@ function Modal({ children, onClose, className = '', label = '弹窗' }) {
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      background.forEach(([element, wasInert]) => { element.inert = wasInert; });
       previousFocus?.focus?.();
     };
   }, []);
@@ -990,13 +1067,17 @@ function Modal({ children, onClose, className = '', label = '弹窗' }) {
 
 function CollectionModal({ completedIds, onClose }) {
   const completedSet = new Set(completedIds);
+  const [showAll, setShowAll] = useState(false);
+  const visibleMissions = showAll ? MISSIONS : MISSIONS.filter((mission) => completedSet.has(mission.id));
   return (
     <Modal onClose={onClose} className="collection-modal" label="我的冒险收藏盒">
       <span className="modal-kicker">MY STORY BOX</span>
       <h2>我的冒险收藏盒</h2>
       <p>每个纪念品都来自一次真正帮到朋友的故事。</p>
+      <div className="collection-filters" role="group" aria-label="筛选收藏"><button type="button" aria-pressed={!showAll} onClick={() => setShowAll(false)}>已收集 · {completedIds.length}</button><button type="button" aria-pressed={showAll} onClick={() => setShowAll(true)}>全部故事 · {MISSIONS.length}</button></div>
+      {!visibleMissions.length && <div className="collection-empty"><span>🎒</span><h3>第一个故事纪念品，等你带回来</h3><p>帮小狐完成一个故事，就能在这里找到它。</p><button className="gate-submit" type="button" onClick={onClose}>去帮助小狐</button></div>}
       <div className="badge-grid">
-        {MISSIONS.map((mission) => {
+        {visibleMissions.map((mission) => {
           const earned = completedSet.has(mission.id);
           return (
             <div key={mission.id} className={`collection-badge ${earned ? 'earned' : ''}`}>
@@ -1024,13 +1105,14 @@ function ParentGate({ onClose, onUnlock }) {
       <span className="parent-icon">👨‍👩‍👧</span><span className="modal-kicker">FOR GROWN-UPS</span>
       <h2>请家长来回答</h2><p>这是家长专属区域</p>
       <div className={`math-question ${error ? 'is-error' : ''}`}><b>2 + 3 =</b><span>{answer || '?'}</span></div>
-      <div className="number-pad">{[2, 5, 8].map((number) => <button key={number} onClick={() => { setAnswer(String(number)); setError(false); }} type="button">{number}</button>)}</div>
+      {error && <p role="alert">再算一算，请家长选择答案。</p>}
+      <div className="number-pad">{[2, 5, 8].map((number) => <button key={number} aria-pressed={answer === String(number)} onClick={() => { setAnswer(String(number)); setError(false); }} type="button">{number}</button>)}</div>
       <button className="gate-submit" onClick={submit} disabled={!answer} type="button">进入家长中心</button>
     </Modal>
   );
 }
 
-function ParentPanel({ progress, now, setAudioOn, onClose }) {
+function ParentPanel({ progress, now, setAudioOn, onClose, onReview }) {
   const { completedIds, lastMissionId, audioOn } = progress;
   const completedCount = completedIds.length;
   const lastMission = getMission(lastMissionId) || MISSIONS[0];
@@ -1040,6 +1122,8 @@ function ParentPanel({ progress, now, setAudioOn, onClose }) {
   const independentlyRecognized = knownItems.filter((item) => item.state.rank >= LEARNING_STATUS.recognized.rank).length;
   const reviewQueue = getReviewQueue(progress, now);
   const reviewIds = new Set(reviewQueue.map((item) => item.itemId));
+  const nextMission = MISSIONS.find((mission) => !completedIds.includes(mission.id));
+  const suggestion = getReviewSuggestion(progress, nextMission, now);
 
   return (
     <Modal onClose={onClose} className="parent-panel-modal" label="孩子的学习脚印">
@@ -1049,15 +1133,16 @@ function ParentPanel({ progress, now, setAudioOn, onClose }) {
         <div><span>👂</span><b>{independentlyRecognized}</b><small>独立辨认</small></div>
         <div><span>🌱</span><b>{reviewQueue.length}</b><small>现在适合复习</small></div>
       </div>
+      {suggestion && <section className="parent-review"><div><b>{suggestion.reason === 'stage-readiness' ? '进入新世界前，再听一听' : '今天可以这样复习'}</b><p>回到「{suggestion.mission.title}」，再听听 {ITEMS[suggestion.itemId].display}。</p></div><button type="button" onClick={() => onReview(suggestion.mission.id)}>开始复习 →</button></section>}
       <section className="learning-report">
         <div className="report-title"><b>每个声音的掌握状态</b><span>完成故事不直接等于学会</span></div>
         {knownItems.length ? knownItems.map((item) => (
           <div className={`skill-row status-${item.state.status}`} key={item.id}><span className={`skill-icon status-${item.state.status}`}>{item.state.icon}</span><div><b lang="en">{item.title}</b><small>{item.state.label}</small></div><i>{reviewIds.has(item.id) ? '现在适合换场景再听' : item.state.needsSupport ? '已排入稍后复习' : '继续自然复现'}</i></div>
-        )) : <div className="empty-report">完成第一关后，这里会出现孩子听懂过的声音。</div>}
+        )) : <div className="empty-report">打开声音，听一听、帮帮忙，学习脚印就会出现在这里。静音故事不会生成听辨记录。</div>}
       </section>
       <section className="parent-tip"><span>💡</span><div><b>今晚这样玩</b><p>{completedCount ? lastMission.familyQuest : '见到孩子时挥挥手，说一次 “Hello!”；愿意看向你就已经很好。'}</p></div></section>
-      <div className="parent-settings"><span><b>游戏声音</b><small>A 女声 · lovely_girl · MiniMax Speech 2.8 HD</small></span><button className={`toggle ${audioOn ? 'is-on' : ''}`} onClick={() => setAudioOn(!audioOn)} type="button" aria-label="切换游戏声音" aria-pressed={audioOn}><i /></button></div>
-      <p className="ai-disclosure">角色语音由 AI 合成；关闭声音时仍可完成故事，但不会形成听辨证据。App 不使用麦克风，不收集儿童声音或学习数据。</p>
+      <div className="parent-settings"><span><b>游戏声音</b><small>中文引导、英文发音和背景音乐</small></span><button className={`toggle ${audioOn ? 'is-on' : ''}`} onClick={() => setAudioOn(!audioOn)} type="button" aria-label="切换游戏声音" aria-pressed={audioOn}><i /></button></div>
+      <p className="ai-disclosure">角色语音由 AI 合成；关闭声音时仍可完成当前世界的故事，但不会形成听辨证据。学习脚印只保存在本机，App 不使用麦克风，也不上传儿童声音或学习数据。</p>
     </Modal>
   );
 }

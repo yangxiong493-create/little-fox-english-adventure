@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "audio:generate": "node scripts/generate-audio.mjs",
-    "test": "node scripts/validate-content.mjs && node scripts/validate-learning.mjs",
+    "test": "node scripts/validate-content.mjs && node scripts/validate-learning.mjs && node --test scripts/validate-runtime.mjs",
     "check": "npm test && vite build"
   },
   "dependencies": {
